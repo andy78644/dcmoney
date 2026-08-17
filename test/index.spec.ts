@@ -3,6 +3,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { describe, expect, it } from "vitest";
 
 import worker from "../src/index";
+import type { DiscordEnv } from "../src/discord/types";
 
 describe("worker", () => {
   it("exposes a health endpoint", async () => {
@@ -11,7 +12,7 @@ describe("worker", () => {
     ) as Parameters<typeof worker.fetch>[0];
     const context = createExecutionContext();
 
-    const response = await worker.fetch(request, env, context);
+    const response = await worker.fetch(request, env as DiscordEnv, context);
     await waitOnExecutionContext(context);
 
     expect(response.status).toBe(200);
@@ -27,7 +28,7 @@ describe("worker", () => {
     ) as Parameters<typeof worker.fetch>[0];
     const context = createExecutionContext();
 
-    const response = await worker.fetch(request, env, context);
+    const response = await worker.fetch(request, env as DiscordEnv, context);
     await waitOnExecutionContext(context);
 
     expect(response.status).toBe(404);
