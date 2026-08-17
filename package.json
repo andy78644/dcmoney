@@ -4,14 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "npm run typecheck && npm test",
+    "check": "npm run types && npm run typecheck && npm test",
     "commands:register": "tsx scripts/register-commands.ts",
+    "db:migrate:local": "wrangler d1 migrations apply dcmoney --local",
+    "db:migrate:remote": "wrangler d1 migrations apply dcmoney --remote",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "types": "wrangler types"
+    "types": "wrangler types",
+    "verify": "npm run check && npm run deploy -- --dry-run"
   },
   "engines": {
     "node": ">=20"
