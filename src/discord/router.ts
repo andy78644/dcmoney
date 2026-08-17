@@ -6,6 +6,14 @@ import {
   handleExpenseModal,
   startExpense,
 } from "./expense-handler";
+import {
+  createDirectSettlement,
+  handleBalanceComponent,
+  handleBalanceModal,
+  handleHistoryComponent,
+  startBalances,
+  startExpenses,
+} from "./query-handler";
 import { ephemeral } from "./responses";
 import type { DiscordInteraction } from "./types";
 
@@ -34,6 +42,15 @@ export async function routeInteraction(
     if (interaction.type === 2 && interaction.data?.name === "expense") {
       return await startExpense(interaction, env.DB);
     }
+    if (interaction.type === 2 && interaction.data?.name === "expenses") {
+      return await startExpenses(interaction, env.DB);
+    }
+    if (interaction.type === 2 && interaction.data?.name === "balances") {
+      return await startBalances(interaction, env.DB);
+    }
+    if (interaction.type === 2 && interaction.data?.name === "settle") {
+      return await createDirectSettlement(interaction, env.DB);
+    }
     if (interaction.type === 4) {
       return await handleLedgerAutocomplete(interaction, env.DB);
     }
@@ -44,10 +61,28 @@ export async function routeInteraction(
       return await handleExpenseComponent(interaction, env.DB);
     }
     if (
+      interaction.type === 3 &&
+      interaction.data?.custom_id?.startsWith("history_") === true
+    ) {
+      return await handleHistoryComponent(interaction, env.DB);
+    }
+    if (
+      interaction.type === 3 &&
+      interaction.data?.custom_id?.startsWith("balance_") === true
+    ) {
+      return await handleBalanceComponent(interaction, env.DB);
+    }
+    if (
       interaction.type === 5 &&
       interaction.data?.custom_id?.startsWith("expense_") === true
     ) {
       return await handleExpenseModal(interaction, env.DB);
+    }
+    if (
+      interaction.type === 5 &&
+      interaction.data?.custom_id?.startsWith("balance_") === true
+    ) {
+      return await handleBalanceModal(interaction, env.DB);
     }
     return ephemeral("目前不支援這個操作。");
   } catch (error) {

@@ -65,6 +65,14 @@ export function optionalString(
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+export function optionalInteger(
+  options: readonly CommandOption[],
+  name: string,
+): number | undefined {
+  const value = options.find((option) => option.name === name)?.value;
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
 export function modalValue(
   interaction: DiscordInteraction,
   customId: string,

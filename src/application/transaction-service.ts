@@ -437,6 +437,17 @@ export class TransactionService {
     return Promise.all(result.results.map((row) => this.#hydrate(row)));
   }
 
+  async get(
+    input: TransactionAccess & { transactionId: string },
+  ): Promise<LedgerTransaction> {
+    await this.#ledgers.requireMember(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    return this.#requireTransaction(input.transactionId, input.ledgerId);
+  }
+
   async getSuggestions(input: TransactionAccess & {
     asOf?: string;
     memberUserId?: string;
