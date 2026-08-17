@@ -16,6 +16,7 @@ interface LedgerRow {
   currency_code: string;
   currency_scale: number;
   owner_user_id: string;
+  balance_revision: number;
   created_at: string;
   archived_at: string | null;
 }
@@ -27,6 +28,7 @@ export interface Ledger {
   currencyCode: string;
   currencyScale: number;
   ownerUserId: string;
+  balanceRevision: number;
   createdAt: string;
   archivedAt: string | null;
 }
@@ -48,6 +50,7 @@ function mapLedger(row: LedgerRow): Ledger {
     currencyCode: row.currency_code,
     currencyScale: row.currency_scale,
     ownerUserId: row.owner_user_id,
+    balanceRevision: row.balance_revision,
     createdAt: row.created_at,
     archivedAt: row.archived_at,
   };
@@ -144,6 +147,7 @@ export class LedgerService {
       currencyCode,
       currencyScale: input.currencyScale,
       ownerUserId: input.actorUserId,
+      balanceRevision: 0,
       createdAt,
       archivedAt: null,
     };

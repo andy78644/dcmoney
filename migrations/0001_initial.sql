@@ -7,6 +7,8 @@ CREATE TABLE ledgers (
   ),
   currency_scale INTEGER NOT NULL CHECK (currency_scale BETWEEN 0 AND 3),
   owner_user_id TEXT NOT NULL,
+  balance_revision INTEGER NOT NULL DEFAULT 0 CHECK (balance_revision >= 0),
+  last_balance_operation_id TEXT,
   created_at TEXT NOT NULL,
   archived_at TEXT
 );

@@ -175,13 +175,18 @@ export class TransactionService {
 
     const statements: D1PreparedStatement[] = [
       this.#receiptStatement(input.interactionId, "expense.create", createdAt),
+      this.#balanceRevisionStatement(ledger, input.interactionId),
       this.#db
         .prepare(
           `INSERT INTO transactions
             (id, ledger_id, type, description, total_amount_minor, occurred_on,
              created_by, created_at, updated_by, updated_at, revision,
              last_operation_id)
-           VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+           SELECT ?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, 1, ?
+            WHERE EXISTS (
+              SELECT 1 FROM ledgers
+               WHERE id = ? AND last_balance_operation_id = ?
+            )`,
         )
         .bind(
           id,
@@ -193,6 +198,8 @@ export class TransactionService {
           createdAt,
           input.actorUserId,
           createdAt,
+          input.interactionId,
+          input.ledgerId,
           input.interactionId,
         ),
       this.#db
@@ -234,7 +241,11 @@ export class TransactionService {
         ),
     ];
 
-    await this.#runCreateBatch(statements, input.interactionId);
+    await this.#runBalanceCreateBatch(
+      statements,
+      input.interactionId,
+      ledger,
+    );
     return transaction;
   }
 
@@ -293,13 +304,18 @@ export class TransactionService {
 
     const statements: D1PreparedStatement[] = [
       this.#receiptStatement(input.interactionId, "settlement.create", createdAt),
+      this.#balanceRevisionStatement(ledger, input.interactionId),
       this.#db
         .prepare(
           `INSERT INTO transactions
             (id, ledger_id, type, description, total_amount_minor, occurred_on,
              created_by, created_at, updated_by, updated_at, revision,
              last_operation_id)
-           VALUES (?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+           SELECT ?, ?, 'settlement', ?, ?, ?, ?, ?, ?, ?, 1, ?
+            WHERE EXISTS (
+              SELECT 1 FROM ledgers
+               WHERE id = ? AND last_balance_operation_id = ?
+            )`,
         )
         .bind(
           id,
@@ -311,6 +327,8 @@ export class TransactionService {
           createdAt,
           input.actorUserId,
           createdAt,
+          input.interactionId,
+          input.ledgerId,
           input.interactionId,
         ),
       this.#db
@@ -344,7 +362,11 @@ export class TransactionService {
         ),
     ];
 
-    await this.#runCreateBatch(statements, input.interactionId);
+    await this.#runBalanceCreateBatch(
+      statements,
+      input.interactionId,
+      ledger,
+    );
     return transaction;
   }
 
@@ -518,6 +540,7 @@ export class TransactionService {
     )`;
     const statements: D1PreparedStatement[] = [
       this.#receiptStatement(input.interactionId, "expense.update", updatedAt),
+      this.#balanceRevisionStatement(ledger, input.interactionId),
       this.#db
         .prepare(
           `UPDATE transactions
@@ -525,7 +548,11 @@ export class TransactionService {
                   updated_by = ?, updated_at = ?, revision = revision + 1,
                   last_operation_id = ?
             WHERE id = ? AND ledger_id = ? AND revision = ?
-              AND deleted_at IS NULL`,
+              AND deleted_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM ledgers
+                 WHERE id = ? AND last_balance_operation_id = ?
+              )`,
         )
         .bind(
           description,
@@ -537,6 +564,8 @@ export class TransactionService {
           input.transactionId,
           input.ledgerId,
           input.expectedRevision,
+          input.ledgerId,
+          input.interactionId,
         ),
       this.#db
         .prepare(
@@ -611,7 +640,10 @@ export class TransactionService {
     ];
 
     const results = await this.#runBatch(statements, input.interactionId);
-    if ((results[1]?.meta.changes ?? 0) === 0) {
+    if (
+      (results[1]?.meta.changes ?? 0) === 0 ||
+      (results[2]?.meta.changes ?? 0) === 0
+    ) {
       throw new ApplicationError(
         "CONFLICT",
         "The transaction was changed by someone else. Reload and try again.",
@@ -689,6 +721,7 @@ export class TransactionService {
     )`;
     const statements: D1PreparedStatement[] = [
       this.#receiptStatement(input.interactionId, "settlement.update", updatedAt),
+      this.#balanceRevisionStatement(ledger, input.interactionId),
       this.#db
         .prepare(
           `UPDATE transactions
@@ -696,7 +729,11 @@ export class TransactionService {
                   updated_by = ?, updated_at = ?, revision = revision + 1,
                   last_operation_id = ?
             WHERE id = ? AND ledger_id = ? AND revision = ?
-              AND deleted_at IS NULL`,
+              AND deleted_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM ledgers
+                 WHERE id = ? AND last_balance_operation_id = ?
+              )`,
         )
         .bind(
           description,
@@ -708,6 +745,8 @@ export class TransactionService {
           input.transactionId,
           input.ledgerId,
           input.expectedRevision,
+          input.ledgerId,
+          input.interactionId,
         ),
       this.#db
         .prepare(
@@ -762,7 +801,10 @@ export class TransactionService {
     ];
 
     const results = await this.#runBatch(statements, input.interactionId);
-    if ((results[1]?.meta.changes ?? 0) === 0) {
+    if (
+      (results[1]?.meta.changes ?? 0) === 0 ||
+      (results[2]?.meta.changes ?? 0) === 0
+    ) {
       throw new ApplicationError(
         "CONFLICT",
         "The transaction was changed by someone else. Reload and try again.",
@@ -776,7 +818,7 @@ export class TransactionService {
     transactionId: string;
     expectedRevision: number;
   }): Promise<void> {
-    await this.#ledgers.requireMember(
+    const ledger = await this.#ledgers.requireMember(
       input.ledgerId,
       input.guildId,
       input.actorUserId,
@@ -788,13 +830,18 @@ export class TransactionService {
     const deletedAt = this.#dependencies.now().toISOString();
     const results = await this.#runBatch([
       this.#receiptStatement(input.interactionId, "transaction.delete", deletedAt),
+      this.#balanceRevisionStatement(ledger, input.interactionId),
       this.#db
         .prepare(
           `UPDATE transactions
               SET deleted_at = ?, deleted_by = ?, updated_at = ?, updated_by = ?,
                   revision = revision + 1, last_operation_id = ?
             WHERE id = ? AND ledger_id = ? AND revision = ?
-              AND deleted_at IS NULL`,
+              AND deleted_at IS NULL
+              AND EXISTS (
+                SELECT 1 FROM ledgers
+                 WHERE id = ? AND last_balance_operation_id = ?
+              )`,
         )
         .bind(
           deletedAt,
@@ -805,6 +852,8 @@ export class TransactionService {
           input.transactionId,
           input.ledgerId,
           input.expectedRevision,
+          input.ledgerId,
+          input.interactionId,
         ),
       this.#db
         .prepare(
@@ -828,7 +877,10 @@ export class TransactionService {
         ),
     ], input.interactionId);
 
-    if ((results[1]?.meta.changes ?? 0) === 0) {
+    if (
+      (results[1]?.meta.changes ?? 0) === 0 ||
+      (results[2]?.meta.changes ?? 0) === 0
+    ) {
       throw new ApplicationError(
         "CONFLICT",
         "The transaction was changed by someone else. Reload and try again.",
@@ -967,11 +1019,49 @@ export class TransactionService {
       .bind(interactionId, operation, createdAt);
   }
 
-  async #runCreateBatch(
+  #balanceRevisionStatement(
+    ledger: Ledger,
+    operationId: string,
+  ): D1PreparedStatement {
+    return this.#db
+      .prepare(
+        `UPDATE ledgers
+            SET balance_revision = balance_revision + 1,
+                last_balance_operation_id = ?
+          WHERE id = ? AND balance_revision = ?`,
+      )
+      .bind(operationId, ledger.id, ledger.balanceRevision);
+  }
+
+  async #runBalanceCreateBatch(
     statements: D1PreparedStatement[],
     interactionId: string,
+    ledger: Ledger,
   ): Promise<void> {
-    await this.#runBatch(statements, interactionId);
+    try {
+      const results = await this.#runBatch(statements, interactionId);
+      if ((results[1]?.meta.changes ?? 0) === 0) {
+        throw new ApplicationError(
+          "CONFLICT",
+          "The ledger changed while this transaction was being saved.",
+        );
+      }
+    } catch (error) {
+      if (error instanceof ApplicationError) {
+        throw error;
+      }
+      const current = await this.#db
+        .prepare(`SELECT balance_revision FROM ledgers WHERE id = ?`)
+        .bind(ledger.id)
+        .first<{ balance_revision: number }>();
+      if (current?.balance_revision !== ledger.balanceRevision) {
+        throw new ApplicationError(
+          "CONFLICT",
+          "The ledger changed while this transaction was being saved.",
+        );
+      }
+      throw error;
+    }
   }
 
   async #runBatch(

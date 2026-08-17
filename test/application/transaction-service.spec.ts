@@ -130,6 +130,53 @@ describe("TransactionService", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
+  it("rejects a write when the ledger balance revision changes concurrently", async () => {
+    const { ledger, guildId, ownerUserId, deps } =
+      await createLedgerWithMembers();
+    let intercepted = false;
+    const conflictingDb = {
+      prepare: env.DB.prepare.bind(env.DB),
+      exec: env.DB.exec.bind(env.DB),
+      dump: env.DB.dump.bind(env.DB),
+      withSession: env.DB.withSession.bind(env.DB),
+      batch: async (statements: D1PreparedStatement[]) => {
+        if (!intercepted) {
+          intercepted = true;
+          await env.DB
+            .prepare(
+              `UPDATE ledgers
+                  SET balance_revision = balance_revision + 1
+                WHERE id = ?`,
+            )
+            .bind(ledger.id)
+            .run();
+        }
+        return env.DB.batch(statements);
+      },
+    } as D1Database;
+    const service = new TransactionService(conflictingDb, deps);
+
+    await expect(
+      service.createExpense({
+        interactionId: `concurrent-${sequence}`,
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+        payerUserId: ownerUserId,
+        totalAmountMinor: 100,
+        shares: [{ userId: "90002", amountMinor: 100 }],
+        occurredOn: "2026-08-18",
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const count = await env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM transactions WHERE ledger_id = ?`,
+    )
+      .bind(ledger.id)
+      .first<{ count: number }>();
+    expect(count?.count).toBe(0);
+  });
+
   it("collapses a chain and supports partial settlement", async () => {
     const { transactions, ledger, guildId, ownerUserId } =
       await createLedgerWithMembers();
