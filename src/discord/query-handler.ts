@@ -1,4 +1,5 @@
 import { LedgerService } from "../application/ledger-service";
+import { ApplicationError } from "../application/errors";
 import { SessionService } from "../application/session-service";
 import {
   TransactionService,
@@ -137,6 +138,71 @@ function transactionDetail(
   ].join("\n");
 }
 
+function historyDetailComponents(
+  sessionId: string,
+  transaction: LedgerTransaction,
+): unknown[] {
+  return [
+    actionRow(
+      {
+        type: 2,
+        style: 1,
+        custom_id: `history_edit:${sessionId}:${transaction.id}`,
+        label: "修改",
+      },
+      {
+        type: 2,
+        style: 4,
+        custom_id: `history_delete:${sessionId}:${transaction.id}:${transaction.revision}`,
+        label: "刪除",
+      },
+      {
+        type: 2,
+        style: 2,
+        custom_id: `history_back:${sessionId}`,
+        label: "返回列表",
+      },
+    ),
+  ];
+}
+
+function parseUserId(value: string): string {
+  const match = /^(?:<@!?)?(\d{2,30})>?$/.exec(value.trim());
+  if (match?.[1] === undefined) {
+    throw new ApplicationError("INVALID_INPUT", "Invalid Discord user ID.");
+  }
+  return match[1];
+}
+
+function parseShares(
+  value: string,
+  currencyScale: number,
+): Array<{ userId: string; amountMinor: number }> {
+  const entries = value
+    .split(/[\n,]+/)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (entries.length === 0) {
+    throw new ApplicationError("INVALID_INPUT", "At least one share is required.");
+  }
+  return entries.map((entry) => {
+    const separator = entry.indexOf("=");
+    if (separator < 1) {
+      throw new ApplicationError(
+        "INVALID_INPUT",
+        "Each share must use member=amount format.",
+      );
+    }
+    return {
+      userId: parseUserId(entry.slice(0, separator)),
+      amountMinor: parsePositiveAmountToMinor(
+        entry.slice(separator + 1),
+        currencyScale,
+      ),
+    };
+  });
+}
+
 async function listFromHistoryState(
   state: HistorySessionState,
   guildId: string,
@@ -223,7 +289,9 @@ export async function handleHistoryComponent(
   interaction: DiscordInteraction,
   db: D1Database,
 ): Promise<Response> {
-  const [action, sessionId] = (interaction.data?.custom_id ?? "").split(":");
+  const [action, sessionId, transactionIdFromAction, revisionText] = (
+    interaction.data?.custom_id ?? ""
+  ).split(":");
   if (sessionId === undefined) {
     return ephemeral("查詢已過期，請重新執行 `/expenses`。");
   }
@@ -242,14 +310,10 @@ export async function handleHistoryComponent(
       actorUserId: session.userId,
       transactionId,
     });
-    return updateMessage(transactionDetail(session.state, transaction), [
-      actionRow({
-        type: 2,
-        style: 2,
-        custom_id: `history_back:${sessionId}`,
-        label: "返回列表",
-      }),
-    ]);
+    return updateMessage(
+      transactionDetail(session.state, transaction),
+      historyDetailComponents(sessionId, transaction),
+    );
   }
   if (action === "history_back") {
     const transactions = await listFromHistoryState(
@@ -258,12 +322,246 @@ export async function handleHistoryComponent(
       session.userId,
       db,
     );
+    session.state.transactionIds = transactions.map(({ id }) => id);
+    await new SessionService(db).update(sessionId, session.state);
     return updateMessage(
       historyContent(session.state, transactions),
       historyComponents(sessionId, session.state, transactions),
     );
   }
+  if (
+    (action === "history_edit" || action === "history_delete") &&
+    transactionIdFromAction !== undefined
+  ) {
+    if (!session.state.transactionIds.includes(transactionIdFromAction)) {
+      return updateMessage("這筆紀錄不在目前查詢結果中。");
+    }
+    const transaction = await new TransactionService(db).get({
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      transactionId: transactionIdFromAction,
+    });
+    if (action === "history_edit") {
+      if (transaction.type === "expense") {
+        return modal({
+          customId: `history_edit_submit:${sessionId}:${transaction.id}:${transaction.revision}`,
+          title: "修改支出",
+          fields: [
+            {
+              customId: "amount",
+              label: `${session.state.currencyCode} 總額`,
+              value: formatMinorAmount(
+                transaction.totalAmountMinor,
+                session.state.currencyScale,
+              ),
+              maxLength: 30,
+            },
+            {
+              customId: "date",
+              label: "日期（YYYY-MM-DD）",
+              value: transaction.occurredOn,
+              maxLength: 10,
+            },
+            {
+              customId: "payer",
+              label: "付款者 Discord ID",
+              value: transaction.payerUserId,
+              maxLength: 30,
+            },
+            {
+              customId: "shares",
+              label: "分攤（每行 Discord ID=金額）",
+              value: transaction.shares
+                .map(
+                  ({ userId, amountMinor }) =>
+                    `${userId}=${formatMinorAmount(
+                      amountMinor,
+                      session.state.currencyScale,
+                    )}`,
+                )
+                .join("\n"),
+              maxLength: 4000,
+              style: 2,
+            },
+            {
+              customId: "description",
+              label: "說明",
+              value: transaction.description,
+              required: false,
+              maxLength: 200,
+            },
+          ],
+        });
+      }
+      return modal({
+        customId: `history_edit_submit:${sessionId}:${transaction.id}:${transaction.revision}`,
+        title: "修改還款",
+        fields: [
+          {
+            customId: "amount",
+            label: `${session.state.currencyCode} 金額`,
+            value: formatMinorAmount(
+              transaction.totalAmountMinor,
+              session.state.currencyScale,
+            ),
+            maxLength: 30,
+          },
+          {
+            customId: "date",
+            label: "日期（YYYY-MM-DD）",
+            value: transaction.occurredOn,
+            maxLength: 10,
+          },
+          {
+            customId: "payer",
+            label: "付款者 Discord ID",
+            value: transaction.payerUserId,
+            maxLength: 30,
+          },
+          {
+            customId: "receiver",
+            label: "收款者 Discord ID",
+            value: transaction.receiverUserId,
+            maxLength: 30,
+          },
+          {
+            customId: "description",
+            label: "說明",
+            value: transaction.description,
+            required: false,
+            maxLength: 200,
+          },
+        ],
+      });
+    }
+    return updateMessage(
+      `確定要刪除這筆${
+        transaction.type === "expense" ? "支出" : "還款"
+      }嗎？刪除後餘額會立即重新計算，稽核紀錄仍會保留。`,
+      [
+        actionRow(
+          {
+            type: 2,
+            style: 4,
+            custom_id: `history_delete_confirm:${sessionId}:${transaction.id}:${transaction.revision}`,
+            label: "確認刪除",
+          },
+          {
+            type: 2,
+            style: 2,
+            custom_id: `history_back:${sessionId}`,
+            label: "取消",
+          },
+        ),
+      ],
+    );
+  }
+  if (
+    action === "history_delete_confirm" &&
+    transactionIdFromAction !== undefined
+  ) {
+    const revision = Number(revisionText);
+    if (!Number.isInteger(revision)) {
+      return updateMessage("紀錄版本無效，請重新載入。");
+    }
+    await new TransactionService(db).delete({
+      interactionId: interaction.id,
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      transactionId: transactionIdFromAction,
+      expectedRevision: revision,
+    });
+    session.state.transactionIds = session.state.transactionIds.filter(
+      (id) => id !== transactionIdFromAction,
+    );
+    await new SessionService(db).update(sessionId, session.state);
+    return updateMessage("已刪除紀錄並重新計算帳本餘額。", [
+      actionRow({
+        type: 2,
+        style: 2,
+        custom_id: `history_back:${sessionId}`,
+        label: "返回列表",
+      }),
+    ]);
+  }
   return ephemeral("不支援這個歷史紀錄操作。");
+}
+
+export async function handleHistoryModal(
+  interaction: DiscordInteraction,
+  db: D1Database,
+): Promise<Response> {
+  const [action, sessionId, transactionId, revisionText] = (
+    interaction.data?.custom_id ?? ""
+  ).split(":");
+  if (
+    action !== "history_edit_submit" ||
+    sessionId === undefined ||
+    transactionId === undefined
+  ) {
+    return ephemeral("不支援這個修改表單。");
+  }
+  const session = await requireHistorySession(interaction, db, sessionId);
+  if (!session.state.transactionIds.includes(transactionId)) {
+    return updateMessage("這筆紀錄不在目前查詢結果中。");
+  }
+  const expectedRevision = Number(revisionText);
+  if (!Number.isInteger(expectedRevision)) {
+    return updateMessage("紀錄版本無效，請重新載入。");
+  }
+  const service = new TransactionService(db);
+  const current = await service.get({
+    ledgerId: session.state.ledgerId,
+    guildId: session.guildId,
+    actorUserId: session.userId,
+    transactionId,
+  });
+  const amountMinor = parsePositiveAmountToMinor(
+    modalValue(interaction, "amount"),
+    session.state.currencyScale,
+  );
+  if (current.type === "expense") {
+    await service.updateExpense({
+      interactionId: interaction.id,
+      transactionId,
+      expectedRevision,
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      payerUserId: parseUserId(modalValue(interaction, "payer")),
+      totalAmountMinor: amountMinor,
+      shares: parseShares(
+        modalValue(interaction, "shares"),
+        session.state.currencyScale,
+      ),
+      description: modalValue(interaction, "description"),
+      occurredOn: modalValue(interaction, "date"),
+    });
+  } else {
+    await service.updateSettlement({
+      interactionId: interaction.id,
+      transactionId,
+      expectedRevision,
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      payerUserId: parseUserId(modalValue(interaction, "payer")),
+      receiverUserId: parseUserId(modalValue(interaction, "receiver")),
+      amountMinor,
+      description: modalValue(interaction, "description"),
+      occurredOn: modalValue(interaction, "date"),
+    });
+  }
+  return updateMessage("已更新紀錄並重新計算帳本餘額。", [
+    actionRow({
+      type: 2,
+      style: 2,
+      custom_id: `history_back:${sessionId}`,
+      label: "返回列表",
+    }),
+  ]);
 }
 
 function balanceContent(state: BalanceSessionState): string {

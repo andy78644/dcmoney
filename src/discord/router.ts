@@ -11,6 +11,7 @@ import {
   handleBalanceComponent,
   handleBalanceModal,
   handleHistoryComponent,
+  handleHistoryModal,
   startBalances,
   startExpenses,
 } from "./query-handler";
@@ -83,6 +84,12 @@ export async function routeInteraction(
       interaction.data?.custom_id?.startsWith("balance_") === true
     ) {
       return await handleBalanceModal(interaction, env.DB);
+    }
+    if (
+      interaction.type === 5 &&
+      interaction.data?.custom_id?.startsWith("history_") === true
+    ) {
+      return await handleHistoryModal(interaction, env.DB);
     }
     return ephemeral("目前不支援這個操作。");
   } catch (error) {

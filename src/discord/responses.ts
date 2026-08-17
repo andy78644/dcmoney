@@ -51,6 +51,7 @@ export function modal(input: {
     placeholder?: string;
     required?: boolean;
     maxLength?: number;
+    style?: 1 | 2;
   }>;
 }): Response {
   return interactionJson({
@@ -65,7 +66,7 @@ export function modal(input: {
             type: 4,
             custom_id: field.customId,
             label: field.label,
-            style: 1,
+            style: field.style ?? 1,
             required: field.required ?? true,
             ...(field.value === undefined ? {} : { value: field.value }),
             ...(field.placeholder === undefined
