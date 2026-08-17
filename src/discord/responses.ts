@@ -15,13 +15,68 @@ export function interactionJson(
   return Response.json(payload, init);
 }
 
-export function ephemeral(content: string): Response {
+export function ephemeral(content: string, components: unknown[] = []): Response {
   return interactionJson({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
       content,
       flags: InteractionResponseFlags.EPHEMERAL,
       allowed_mentions: { parse: [] },
+      components,
+    },
+  });
+}
+
+export function updateMessage(
+  content: string,
+  components: unknown[] = [],
+): Response {
+  return interactionJson({
+    type: InteractionResponseType.UPDATE_MESSAGE,
+    data: {
+      content,
+      components,
+      allowed_mentions: { parse: [] },
+    },
+  });
+}
+
+export function modal(input: {
+  customId: string;
+  title: string;
+  fields: Array<{
+    customId: string;
+    label: string;
+    value?: string;
+    placeholder?: string;
+    required?: boolean;
+    maxLength?: number;
+  }>;
+}): Response {
+  return interactionJson({
+    type: InteractionResponseType.MODAL,
+    data: {
+      custom_id: input.customId,
+      title: input.title,
+      components: input.fields.map((field) => ({
+        type: 1,
+        components: [
+          {
+            type: 4,
+            custom_id: field.customId,
+            label: field.label,
+            style: 1,
+            required: field.required ?? true,
+            ...(field.value === undefined ? {} : { value: field.value }),
+            ...(field.placeholder === undefined
+              ? {}
+              : { placeholder: field.placeholder }),
+            ...(field.maxLength === undefined
+              ? {}
+              : { max_length: field.maxLength }),
+          },
+        ],
+      })),
     },
   });
 }

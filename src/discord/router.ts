@@ -1,6 +1,11 @@
 import { DomainError } from "../domain/errors";
 import { ApplicationError } from "../application/errors";
 import { handleLedgerAutocomplete, handleLedgerCommand } from "./ledger-handler";
+import {
+  handleExpenseComponent,
+  handleExpenseModal,
+  startExpense,
+} from "./expense-handler";
 import { ephemeral } from "./responses";
 import type { DiscordInteraction } from "./types";
 
@@ -26,8 +31,23 @@ export async function routeInteraction(
     if (interaction.type === 2 && interaction.data?.name === "ledger") {
       return await handleLedgerCommand(interaction, env.DB);
     }
-    if (interaction.type === 4 && interaction.data?.name === "ledger") {
+    if (interaction.type === 2 && interaction.data?.name === "expense") {
+      return await startExpense(interaction, env.DB);
+    }
+    if (interaction.type === 4) {
       return await handleLedgerAutocomplete(interaction, env.DB);
+    }
+    if (
+      interaction.type === 3 &&
+      interaction.data?.custom_id?.startsWith("expense_") === true
+    ) {
+      return await handleExpenseComponent(interaction, env.DB);
+    }
+    if (
+      interaction.type === 5 &&
+      interaction.data?.custom_id?.startsWith("expense_") === true
+    ) {
+      return await handleExpenseModal(interaction, env.DB);
     }
     return ephemeral("目前不支援這個操作。");
   } catch (error) {

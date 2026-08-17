@@ -18,6 +18,8 @@ const ledgerOption = {
   autocomplete: true,
 } as const;
 
+const expenseLedgerOption = { ...ledgerOption };
+
 const memberSubcommands = ["add", "remove"].map((name) => ({
   type: subcommand,
   name,
@@ -73,6 +75,58 @@ export const commandDefinitions = [
         name: "member",
         description: "管理帳本成員",
         options: memberSubcommands,
+      },
+    ],
+  },
+  {
+    name: "expense",
+    description: "新增一筆多人分攤支出",
+    type: 1,
+    contexts: [0],
+    integration_types: [0],
+    options: [
+      {
+        type: subcommand,
+        name: "add",
+        description: "新增支出並選擇分攤成員",
+        options: [
+          expenseLedgerOption,
+          {
+            type: stringOption,
+            name: "amount",
+            description: "支出總額",
+            required: true,
+          },
+          {
+            type: userOption,
+            name: "payer",
+            description: "付款者",
+            required: true,
+          },
+          {
+            type: stringOption,
+            name: "split",
+            description: "分攤方式",
+            required: true,
+            choices: [
+              { name: "平均分攤", value: "equal" },
+              { name: "指定每人金額", value: "custom" },
+            ],
+          },
+          {
+            type: stringOption,
+            name: "description",
+            description: "用途或備註",
+            required: false,
+            max_length: 200,
+          },
+          {
+            type: stringOption,
+            name: "date",
+            description: "消費日期（YYYY-MM-DD，預設今天）",
+            required: false,
+          },
+        ],
       },
     ],
   },

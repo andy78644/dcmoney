@@ -57,6 +57,32 @@ export function requiredString(
   return value;
 }
 
+export function optionalString(
+  options: readonly CommandOption[],
+  name: string,
+): string | undefined {
+  const value = options.find((option) => option.name === name)?.value;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+export function modalValue(
+  interaction: DiscordInteraction,
+  customId: string,
+): string {
+  for (const row of interaction.data?.components ?? []) {
+    const component = row.components?.find(
+      (candidate) => candidate.custom_id === customId,
+    );
+    if (component?.value !== undefined) {
+      return component.value;
+    }
+  }
+  throw new ApplicationError(
+    "INVALID_INPUT",
+    `Modal value ${customId} is missing.`,
+  );
+}
+
 export function findFocusedOption(
   options: readonly CommandOption[] | undefined,
 ): CommandOption | undefined {
