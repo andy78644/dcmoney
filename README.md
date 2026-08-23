@@ -76,10 +76,14 @@ npm run verify
 2. 建立 D1 database：
 
    ```bash
-   npx wrangler d1 create dcmoney
+   npx wrangler d1 create dcmoney-us --location enam
    ```
 
-3. 將指令輸出的 `database_id` 填入 `wrangler.jsonc`，取代目前的全零 placeholder。
+   `--location` 很重要。Discord 從美國的伺服器送出 interaction，Worker 因此
+   在美東執行；資料庫放在別的大陸會讓每次查詢多花約 200ms，累積起來會逼近
+   Discord 的 3 秒回應上限。詳見 [開發進度](docs/PROGRESS.md) 的效能一節。
+
+3. 將指令輸出的 `database_id` 與 `database_name` 填入 `wrangler.jsonc`。
 
 4. 重新產生型別並套用 migration：
 
@@ -137,7 +141,8 @@ npm run verify
 - 交易更新使用 transaction revision；所有餘額變更另使用 ledger balance revision。
 - 刪除只標記為 deleted，原始 audit 不會被移除。
 - 預設日期使用 Asia/Taipei 日曆日期，資料庫時間戳使用 UTC。
-- 回應設定 `allowed_mentions`，顯示成員時不會意外 ping。
+- 回應設定 `allowed_mentions`，顯示成員時不會意外 ping。唯一的例外是加入成員
+  的通知，它只提及該次新加入的人。
 
 正式使用前建議定期執行 D1 export 或使用 Cloudflare 的備份／Time Travel 能力，並至少演練一次還原流程。
 
@@ -146,7 +151,7 @@ npm run verify
 ```text
 src/domain/         純金額、分攤、分錄與債務簡化
 src/application/    D1 帳本、交易、稽核與 session services
-src/discord/        Discord 指令、元件、Modal 與回應格式
+src/discord/        Discord 指令、元件、Modal、公開公告與回應格式
 migrations/         D1 schema migrations
 scripts/            Slash Command 註冊工具
 test/               domain、D1 service 與 Worker 互動測試

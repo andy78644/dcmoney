@@ -1,51 +1,88 @@
 # 開發進度
 
-最後更新：2026-08-19
+最後更新：2026-08-24
 
-目前狀態：MVP 功能已完成實作並通過本機驗證；尚待設定 Cloudflare 與 Discord 憑證後部署。
+目前狀態：已上線運作中。Worker、D1 與 Discord slash commands 都已部署完成，
+MVP 功能之外另有多輪介面與效能修正。
+
+## 部署現況
+
+| 項目 | 值 |
+| --- | --- |
+| Cloudflare 帳號 | Confirmed Degree |
+| Worker | `https://dcmoney.confirmed-degree.workers.dev` |
+| Interactions Endpoint | 同上 `+ /interactions` |
+| D1 | `dcmoney-us`，位於 ENAM（美東） |
+| Discord Application | moneybot |
+| Slash commands | global scope，5 個指令 |
+| Worker secret | `DISCORD_PUBLIC_KEY` |
+
+帳號是用 Cloudflare 的 temporary account 建立、再 claim 成正式帳號的，因此
+與原本的個人帳號並存。Worker 執行時只需要 `DISCORD_PUBLIC_KEY` 與 D1 binding，
+不持有任何 Discord bot token。
 
 ## 已完成
 
-- 建立 TypeScript、Cloudflare Workers、D1 與 Vitest 專案基礎，包含 D1 migration 與 GitHub Actions CI。
-- 建立多帳本資料模型：每個 Discord 伺服器可建立多個帳本，帳本建立者管理成員；所有帳本成員均可修改或刪除紀錄，且操作會留下稽核紀錄。
-- 建立金額與分帳核心：使用最小貨幣單位的安全整數、單一付款人、平均或自訂精確分攤，以及債務鏈簡化。
-- 建立 D1 資料服務：帳本、成員、交易、分錄、結算、互動工作階段、冪等請求與稽核紀錄；也保護餘額更新的並行寫入。
-- 完成 Discord slash commands：
+### MVP
 
-  - `/ledger`：建立、列出帳本，以及新增／移除成員。
-  - `/expense add`：以選單與 Modal 引導輸入付款人、參與者、金額、分攤方式與說明。
-  - `/expenses`：依帳本、日期與付款人查詢明細，可檢視、編輯與刪除。
-  - `/balances`：列出經債務簡化後的未結清餘額，支援成員篩選與歷史截止日查詢。
-  - `/settle`：支援全額或部分結算。
+- TypeScript、Cloudflare Workers、D1 與 Vitest 專案基礎，含 migration 與 CI。
+- 多帳本資料模型：每個伺服器可建多個帳本，建立者管理成員，所有成員都能修改或
+  刪除紀錄且留下稽核紀錄。
+- 金額與分帳核心：最小貨幣單位整數、單一付款人、平均或自訂分攤、債務鏈簡化。
+- D1 資料服務：帳本、成員、交易、分錄、結算、工作階段、冪等請求與稽核紀錄，
+  並保護餘額更新的並行寫入。
+- 五個 slash command 與 Interaction 簽章驗證。
 
-- 實作 Discord Interaction 簽章驗證、指令註冊腳本與本機／遠端 D1 migration 指令。
+### 上線後的修正與增補
 
-## 最近驗證結果
+- **成員選單只列帳本成員**。原本用 Discord user select，一定列出整個伺服器，
+  選到非成員時流程還會照常走到確認步驟，直到寫入才失敗。改為由帳本成員產生的
+  string select，付款者、收款者等欄位則改用 autocomplete。
+- **成員顯示名稱**。`ledger_members` 新增 `display_name`，加入成員時擷取
+  伺服器暱稱、global name 或 username，選單不再顯示一串數字 ID。
+- **還款金額可見**。部分還款表單預填目前欠款、`/settle` 的金額提供 autocomplete，
+  超額還款的錯誤會講出實際上限，並與「方向相反」分成不同訊息。
+- **autocomplete 不再回錯誤型別的回應**。Discord 只接受 type 8，原本的錯誤處理
+  一律回 type 4，會被 Discord 視為失敗但 Worker 記錄成成功。
+- **公開可見度**。帳本可設為公開，記帳、還款、修改與刪除都會公告到頻道；
+  `/expense add`、`/settle`、`/balances` 也各有單次公開的選項。
+- **批次加入成員**。`/ledger member add` 不指定 user 時開多選，一次最多 25 位，
+  只做一次權限檢查與一次批次寫入，已在帳本內的人會被略過而非讓整批失敗。
+- **成員清單與加入通知**。新增 `/ledger member list`；加入成員時在頻道通知並
+  提及對方，這是唯一會實際 ping 人的訊息。
 
-2026-08-19 已執行 `npm run verify`：
+## 效能：資料庫位置
 
-- TypeScript 型別產生與型別檢查通過。
-- Vitest：8 個測試檔、46 個測試全部通過。
-- Cloudflare Workers 生產環境 dry-run bundle 通過：114.53 KiB（gzip 21.18 KiB）。
-- `npm audit --audit-level=high`：0 個高嚴重度以上弱點。
+D1 原本建在 APAC/HKG，因為它是從台灣用 wrangler 建立的。但實際流量全部來自
+Discord 位於美國的伺服器，Worker 因此固定在 ATL 執行。
 
-## 尚待部署
+實測 29 筆請求：SQL 本身只花 0.24ms，整個請求卻要 217–1654ms，時間全部消耗在
+跨太平洋往返，每趟約 200ms。最慢的請求已用掉 Discord 3 秒上限的一半以上，
+偶爾超時就會顯示載入失敗，而 Worker 端仍記錄為成功，難以察覺。
 
-1. 建立 Cloudflare D1 資料庫，並把 `wrangler.jsonc` 中的預留 database ID 換成實際值。
-2. 執行遠端 D1 migration。
-3. 設定 Worker secret `DISCORD_PUBLIC_KEY`，然後部署 Worker。
-4. 將 Discord Application 的 Interaction Endpoint URL 指向 Worker 網址。
-5. 使用 Discord application ID、bot token 與測試 guild ID 註冊 slash commands，再將應用程式安裝到伺服器。
+資料庫重建於 ENAM 並搬移資料後，往返降至約 20ms。
 
-完整操作步驟請見 [README](../README.md)。
+**經驗**：D1 的位置要對齊流量來源，不是開發者的所在地。
 
-## 目前不在 MVP 範圍
+## 驗證
+
+2026-08-24：型別檢查通過，Vitest 11 個測試檔、69 個測試全部通過。
+
+## 目前不在範圍內
 
 - 多付款人、百分比分攤或權重分攤。
 - 多幣別與匯率換算。
-- 自然語言聊天解析、Gateway 常駐連線、定期帳單、收據 OCR、CSV 匯入匯出與網頁後台。
+- 自然語言解析、Gateway 常駐連線、定期帳單、收據 OCR、CSV 匯入匯出與網頁後台。
+- 私訊通知。Worker 刻意不持有 bot token，因此通知一律發在頻道。
 
-目前互動式新增支出最多支援 10 位參與者；帳本幣別在建立時固定，內建 TWD、JPY、USD、EUR。
+一筆支出最多 25 位分攤成員，一次最多加入 25 位帳本成員，兩者都是 Discord
+元件的上限。帳本幣別在建立時固定，內建 TWD、JPY、USD、EUR。
+
+## 已知待辦
+
+- 修改紀錄的表單仍以 Discord user ID 文字輸入，因為 Discord modal 只支援文字欄位。
+- 專案沒有 git remote，所有 commit 只存在於本機。
+- 舊的 `dcmoney`（HKG）資料庫尚未刪除，確認新資料庫穩定後可移除。
 
 ## 相關文件
 
@@ -54,4 +91,5 @@
 
 ## 維護方式
 
-每完成一個功能或部署階段，更新本文件的「已完成」、「最近驗證結果」與「尚待部署」，並附上對應 commit 或驗證日期。
+每完成一個功能或部署階段，更新「已完成」、「驗證」與「已知待辦」，並附上對應
+commit 或驗證日期。
