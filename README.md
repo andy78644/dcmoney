@@ -16,7 +16,7 @@
 - revision conflict、軟刪除、audit trail、Interaction 冪等與帳本餘額版本鎖。
 - 所有帳務畫面預設為 Discord ephemeral response。
 
-目前一筆支出最多從 Discord User Select 選擇 10 位分攤成員。每個帳本只能使用一種幣別；第一版內建 TWD、JPY、USD、EUR，不處理匯率。
+分攤成員從只列出帳本成員的選單挑選，一筆支出最多 25 位。每個帳本只能使用一種幣別；第一版內建 TWD、JPY、USD、EUR，不處理匯率。
 
 ## 指令
 

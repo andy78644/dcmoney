@@ -1,6 +1,10 @@
 import { SessionService } from "../application/session-service";
 import { TransactionService } from "../application/transaction-service";
-import { LedgerService } from "../application/ledger-service";
+import {
+  LedgerService,
+  memberLabel,
+  type LedgerMember,
+} from "../application/ledger-service";
 import {
   splitEqually,
   validateCustomShares,
@@ -41,14 +45,24 @@ function actionRow(...components: unknown[]): unknown {
   return { type: 1, components };
 }
 
-function participantPicker(sessionId: string): unknown[] {
+// Discord 的 string select 最多 25 個選項。
+const MAX_PARTICIPANT_OPTIONS = 25;
+
+function participantPicker(
+  sessionId: string,
+  members: readonly LedgerMember[],
+): unknown[] {
+  const options = members
+    .slice(0, MAX_PARTICIPANT_OPTIONS)
+    .map((member) => ({ label: memberLabel(member), value: member.userId }));
   return [
     actionRow({
-      type: 5,
+      type: 3,
       custom_id: `expense_participants:${sessionId}`,
       placeholder: "選擇要分攤的成員",
       min_values: 1,
-      max_values: 10,
+      max_values: options.length,
+      options,
     }),
     actionRow({
       type: 2,
@@ -147,21 +161,25 @@ export async function startExpense(
     return ephemeral("不支援這個支出操作。");
   }
   const ledgerId = requiredString(command.options, "ledger");
-  const ledger = await new LedgerService(db).requireMember(
-    ledgerId,
-    guildId,
-    actorUserId,
-  );
+  const ledgers = new LedgerService(db);
+  const ledger = await ledgers.requireMember(ledgerId, guildId, actorUserId);
   const split = requiredString(command.options, "split");
   if (split !== "equal" && split !== "custom") {
     return ephemeral("不支援這個分攤方式。");
+  }
+  const members = await ledgers.listMembers(ledgerId);
+  const payerUserId = requiredString(command.options, "payer");
+  if (!members.some((member) => member.userId === payerUserId)) {
+    return ephemeral(
+      `<@${payerUserId}> 不是「${ledger.name}」的成員，無法作為付款者。請先用 /ledger member add 加入。`,
+    );
   }
   const state: ExpenseSessionState = {
     ledgerId,
     ledgerName: ledger.name,
     currencyCode: ledger.currencyCode,
     currencyScale: ledger.currencyScale,
-    payerUserId: requiredString(command.options, "payer"),
+    payerUserId,
     totalAmountMinor: parsePositiveAmountToMinor(
       requiredString(command.options, "amount"),
       ledger.currencyScale,
@@ -176,9 +194,17 @@ export async function startExpense(
     kind: "expense",
     state,
   });
+  const truncated = members.length > MAX_PARTICIPANT_OPTIONS;
   return ephemeral(
-    `正在新增「${ledger.name}」支出。請選擇分攤成員（付款者也可以包含在內）。`,
-    participantPicker(session.id),
+    [
+      `正在新增「${ledger.name}」支出。請選擇分攤成員（付款者也可以包含在內）。`,
+      ...(truncated
+        ? [
+            `此帳本有 ${members.length} 位成員，選單只顯示前 ${MAX_PARTICIPANT_OPTIONS} 位。`,
+          ]
+        : []),
+    ].join("\n"),
+    participantPicker(session.id, members),
   );
 }
 
@@ -205,7 +231,13 @@ export async function handleExpenseComponent(
   if (action === "expense_participants") {
     const participantUserIds = interaction.data?.values ?? [];
     if (participantUserIds.length === 0) {
-      return updateMessage("至少要選擇一位分攤成員。", participantPicker(sessionId));
+      return updateMessage(
+        "至少要選擇一位分攤成員。",
+        participantPicker(
+          sessionId,
+          await new LedgerService(db).listMembers(state.ledgerId),
+        ),
+      );
     }
     state.participantUserIds = participantUserIds;
     if (state.splitMethod === "equal") {

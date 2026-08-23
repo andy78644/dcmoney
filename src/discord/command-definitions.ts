@@ -21,20 +21,43 @@ const ledgerOption = {
 
 const expenseLedgerOption = { ...ledgerOption };
 
-const memberSubcommands = ["add", "remove"].map((name) => ({
-  type: subcommand,
-  name,
-  description: name === "add" ? "加入帳本成員" : "移除帳本成員",
-  options: [
-    ledgerOption,
-    {
-      type: userOption,
-      name: "user",
-      description: "Discord 成員",
-      required: true,
-    },
-  ],
-}));
+// 帳本成員欄位：用 autocomplete 字串而非 user option，
+// 這樣候選清單能限制在帳本成員內，而不是整個伺服器。
+const memberOption = (
+  name: string,
+  description: string,
+  required: boolean,
+) =>
+  ({
+    type: stringOption,
+    name,
+    description,
+    required,
+    autocomplete: true,
+  }) as const;
+
+const memberSubcommands = [
+  {
+    type: subcommand,
+    name: "add",
+    description: "加入帳本成員",
+    options: [
+      ledgerOption,
+      {
+        type: userOption,
+        name: "user",
+        description: "Discord 成員",
+        required: true,
+      },
+    ],
+  },
+  {
+    type: subcommand,
+    name: "remove",
+    description: "移除帳本成員",
+    options: [ledgerOption, memberOption("user", "帳本成員", true)],
+  },
+];
 
 export const commandDefinitions = [
   {
@@ -98,12 +121,7 @@ export const commandDefinitions = [
             description: "支出總額",
             required: true,
           },
-          {
-            type: userOption,
-            name: "payer",
-            description: "付款者",
-            required: true,
-          },
+          memberOption("payer", "付款者", true),
           {
             type: stringOption,
             name: "split",
@@ -139,12 +157,7 @@ export const commandDefinitions = [
     integration_types: [0],
     options: [
       ledgerOption,
-      {
-        type: userOption,
-        name: "member",
-        description: "只顯示涉及這位成員的紀錄",
-        required: false,
-      },
+      memberOption("member", "只顯示涉及這位成員的紀錄", false),
       {
         type: stringOption,
         name: "start_date",
@@ -190,12 +203,7 @@ export const commandDefinitions = [
         description: "查看截至日期（YYYY-MM-DD）",
         required: false,
       },
-      {
-        type: userOption,
-        name: "member",
-        description: "只顯示與這位成員有關的建議",
-        required: false,
-      },
+      memberOption("member", "只顯示與這位成員有關的建議", false),
     ],
   },
   {
@@ -206,18 +214,8 @@ export const commandDefinitions = [
     integration_types: [0],
     options: [
       ledgerOption,
-      {
-        type: userOption,
-        name: "payer",
-        description: "付款者（欠款人）",
-        required: true,
-      },
-      {
-        type: userOption,
-        name: "receiver",
-        description: "收款者",
-        required: true,
-      },
+      memberOption("payer", "付款者（欠款人）", true),
+      memberOption("receiver", "收款者", true),
       {
         type: stringOption,
         name: "amount",

@@ -1,14 +1,24 @@
-import { LedgerService } from "../application/ledger-service";
+import {
+  LedgerService,
+  memberLabel,
+} from "../application/ledger-service";
 import { currencyChoices } from "./command-definitions";
 import {
   findFocusedOption,
+  findOptionValue,
   getSubcommand,
   requiredString,
   requireActorUserId,
   requireGuildId,
+  resolvedDisplayName,
+  actorDisplayName,
 } from "./options";
 import { autocomplete, ephemeral } from "./responses";
 import type { DiscordInteraction } from "./types";
+
+// 這些欄位的候選項目是帳本成員，不是整個伺服器的人。
+// `ledger member add` 的 user 欄位刻意不在此列 —— 加人時本來就要從全伺服器挑。
+const MEMBER_OPTION_NAMES = new Set(["payer", "receiver", "member", "user"]);
 
 export async function handleLedgerCommand(
   interaction: DiscordInteraction,
@@ -39,6 +49,7 @@ export async function handleLedgerCommand(
       name,
       currencyCode,
       currencyScale: Number(scaleText),
+      displayName: actorDisplayName(interaction),
     });
     return ephemeral(
       `已建立帳本「${ledger.name}」，幣別為 ${ledger.currencyCode}。`,
@@ -72,6 +83,7 @@ export async function handleLedgerCommand(
         guildId,
         actorUserId,
         memberUserId,
+        displayName: resolvedDisplayName(interaction, memberUserId),
       });
       return ephemeral(`已將 <@${memberUserId}> 加入帳本。`);
     }
@@ -95,17 +107,49 @@ export async function handleLedgerAutocomplete(
   const guildId = requireGuildId(interaction);
   const actorUserId = requireActorUserId(interaction);
   const focused = findFocusedOption(interaction.data?.options);
-  if (focused?.name !== "ledger") {
+  if (focused === undefined) {
     return autocomplete([]);
   }
-  const query = typeof focused.value === "string" ? focused.value.toLowerCase() : "";
-  const ledgers = await new LedgerService(db).listForMember(
-    guildId,
-    actorUserId,
-  );
+  const query =
+    typeof focused.value === "string" ? focused.value.toLowerCase() : "";
+  const service = new LedgerService(db);
+
+  if (focused.name === "ledger") {
+    const ledgers = await service.listForMember(guildId, actorUserId);
+    return autocomplete(
+      ledgers
+        .filter((ledger) => ledger.name.toLowerCase().includes(query))
+        .map((ledger) => ({
+          name: ledger.name.slice(0, 100),
+          value: ledger.id,
+        })),
+    );
+  }
+
+  if (!MEMBER_OPTION_NAMES.has(focused.name)) {
+    return autocomplete([]);
+  }
+
+  // 成員清單依附於已選定的帳本；還沒選帳本就沒有候選項目。
+  const ledgerId = findOptionValue(interaction.data?.options, "ledger");
+  if (ledgerId === undefined) {
+    return autocomplete([]);
+  }
+  let members;
+  try {
+    await service.requireMember(ledgerId, guildId, actorUserId);
+    members = await service.listMembers(ledgerId);
+  } catch {
+    return autocomplete([]);
+  }
   return autocomplete(
-    ledgers
-      .filter((ledger) => ledger.name.toLowerCase().includes(query))
-      .map((ledger) => ({ name: ledger.name.slice(0, 100), value: ledger.id })),
+    members
+      .map((member) => ({
+        name: memberLabel(member),
+        value: member.userId,
+      }))
+      .filter(({ name, value }) =>
+        name.toLowerCase().includes(query) || value.includes(query),
+      ),
   );
 }

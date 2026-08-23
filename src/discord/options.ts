@@ -22,6 +22,38 @@ export function requireActorUserId(interaction: DiscordInteraction): string {
   return userId;
 }
 
+export function actorDisplayName(
+  interaction: DiscordInteraction,
+): string | undefined {
+  const nick = interaction.member?.nick;
+  if (typeof nick === "string" && nick.length > 0) {
+    return nick;
+  }
+  const user = interaction.member?.user ?? interaction.user;
+  const globalName = user?.global_name;
+  if (typeof globalName === "string" && globalName.length > 0) {
+    return globalName;
+  }
+  return user?.username;
+}
+
+export function resolvedDisplayName(
+  interaction: DiscordInteraction,
+  userId: string,
+): string | undefined {
+  const resolved = interaction.data?.resolved;
+  const nick = resolved?.members?.[userId]?.nick;
+  if (typeof nick === "string" && nick.length > 0) {
+    return nick;
+  }
+  const user = resolved?.users?.[userId];
+  const globalName = user?.global_name;
+  if (typeof globalName === "string" && globalName.length > 0) {
+    return globalName;
+  }
+  return user?.username;
+}
+
 export function getSubcommand(
   options: CommandOption[] | undefined,
 ): { group?: string; name: string; options: CommandOption[] } {
@@ -89,6 +121,23 @@ export function modalValue(
     "INVALID_INPUT",
     `Modal value ${customId} is missing.`,
   );
+}
+
+/** Finds an option's value anywhere in the (possibly nested) option tree. */
+export function findOptionValue(
+  options: readonly CommandOption[] | undefined,
+  name: string,
+): string | undefined {
+  for (const option of options ?? []) {
+    if (option.name === name && typeof option.value === "string") {
+      return option.value;
+    }
+    const nested = findOptionValue(option.options, name);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
 }
 
 export function findFocusedOption(

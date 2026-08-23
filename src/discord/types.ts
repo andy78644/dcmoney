@@ -5,6 +5,12 @@ export interface DiscordEnv extends Env {
 export interface DiscordUser {
   id: string;
   username?: string;
+  global_name?: string | null;
+}
+
+export interface ResolvedData {
+  users?: Record<string, DiscordUser>;
+  members?: Record<string, { nick?: string | null }>;
 }
 
 export interface CommandOption {
@@ -20,6 +26,7 @@ export interface InteractionData {
   options?: CommandOption[];
   custom_id?: string;
   values?: string[];
+  resolved?: ResolvedData;
   components?: Array<{
     components?: Array<{ custom_id?: string; value?: string }>;
   }>;
@@ -29,7 +36,7 @@ export interface DiscordInteraction {
   id: string;
   type: number;
   guild_id?: string;
-  member?: { user: DiscordUser };
+  member?: { user: DiscordUser; nick?: string | null };
   user?: DiscordUser;
   data?: InteractionData;
 }

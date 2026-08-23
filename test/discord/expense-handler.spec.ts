@@ -318,3 +318,72 @@ describe("expense interaction wizard", () => {
     expect(response.data?.content).toContain("找不到指定");
   });
 });
+
+describe("participant picker", () => {
+  it("only offers ledger members, labelled by display name", async () => {
+    const { guildId, ownerUserId, memberA, memberB, ledger } = await fixture();
+    const start = await startWizard({
+      guildId,
+      userId: ownerUserId,
+      ledgerId: ledger.id,
+      split: "equal",
+      amount: "300",
+    });
+
+    const select = (
+      start.data?.components?.[0] as {
+        components?: Array<{
+          type?: number;
+          options?: Array<{ label: string; value: string }>;
+          max_values?: number;
+        }>;
+      }
+    )?.components?.[0];
+
+    // 3 = string select. A user select (5) would list the whole server.
+    expect(select?.type).toBe(3);
+    expect(select?.options?.map(({ value }) => value)).toEqual([
+      ownerUserId,
+      memberA,
+      memberB,
+    ]);
+    expect(select?.max_values).toBe(3);
+  });
+
+  it("rejects a payer who is not a ledger member", async () => {
+    const { guildId, ownerUserId, ledger } = await fixture();
+    const outsider = "9999999999";
+    const response = await payload(
+      await routeInteraction(
+        {
+          ...baseInteraction(
+            `expense-outsider-${++sequence}`,
+            2,
+            guildId,
+            ownerUserId,
+          ),
+          data: {
+            name: "expense",
+            options: [
+              {
+                name: "add",
+                type: 1,
+                options: [
+                  { name: "ledger", type: 3, value: ledger.id },
+                  { name: "amount", type: 3, value: "300" },
+                  { name: "payer", type: 6, value: outsider },
+                  { name: "split", type: 3, value: "equal" },
+                ],
+              },
+            ],
+          },
+        },
+        env,
+      ),
+    );
+
+    expect(response.data?.content).toContain(outsider);
+    expect(response.data?.content).toContain("不是");
+    expect(response.data?.components ?? []).toHaveLength(0);
+  });
+});

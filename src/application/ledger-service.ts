@@ -40,6 +40,17 @@ export interface CreateLedgerInput {
   name: string;
   currencyCode: string;
   currencyScale: number;
+  displayName?: string | undefined;
+}
+
+export interface LedgerMember {
+  userId: string;
+  displayName: string | null;
+}
+
+/** Discord 選單／autocomplete 的標籤上限是 100 字元。 */
+export function memberLabel(member: LedgerMember): string {
+  return (member.displayName ?? member.userId).slice(0, 100);
 }
 
 function mapLedger(row: LedgerRow): Ledger {
@@ -119,10 +130,16 @@ export class LedgerService {
         this.#db
           .prepare(
             `INSERT INTO ledger_members
-              (ledger_id, user_id, added_by, created_at)
-             VALUES (?, ?, ?, ?)`,
+              (ledger_id, user_id, added_by, created_at, display_name)
+             VALUES (?, ?, ?, ?, ?)`,
           )
-          .bind(id, input.actorUserId, input.actorUserId, createdAt),
+          .bind(
+            id,
+            input.actorUserId,
+            input.actorUserId,
+            createdAt,
+            input.displayName ?? null,
+          ),
       ]);
     } catch (error) {
       if (await this.#hasReceipt(input.interactionId)) {
@@ -212,6 +229,22 @@ export class LedgerService {
     return ledger;
   }
 
+  async listMembers(ledgerId: string): Promise<LedgerMember[]> {
+    const result = await this.#db
+      .prepare(
+        `SELECT user_id, display_name
+           FROM ledger_members
+          WHERE ledger_id = ?
+          ORDER BY created_at, user_id`,
+      )
+      .bind(ledgerId)
+      .all<{ user_id: string; display_name: string | null }>();
+    return result.results.map(({ user_id, display_name }) => ({
+      userId: user_id,
+      displayName: display_name,
+    }));
+  }
+
   async listMemberIds(ledgerId: string): Promise<string[]> {
     const result = await this.#db
       .prepare(
@@ -231,6 +264,7 @@ export class LedgerService {
     guildId: string;
     actorUserId: string;
     memberUserId: string;
+    displayName?: string | undefined;
   }): Promise<void> {
     await this.requireOwner(input.ledgerId, input.guildId, input.actorUserId);
     assertDiscordId(input.memberUserId, "Member user ID");
@@ -248,14 +282,15 @@ export class LedgerService {
         this.#db
           .prepare(
             `INSERT INTO ledger_members
-              (ledger_id, user_id, added_by, created_at)
-             VALUES (?, ?, ?, ?)`,
+              (ledger_id, user_id, added_by, created_at, display_name)
+             VALUES (?, ?, ?, ?, ?)`,
           )
           .bind(
             input.ledgerId,
             input.memberUserId,
             input.actorUserId,
             createdAt,
+            input.displayName ?? null,
           ),
       ]);
     } catch (error) {
