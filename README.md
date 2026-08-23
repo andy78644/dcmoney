@@ -4,6 +4,21 @@
 
 目前實作與部署狀態請見 [開發進度](docs/PROGRESS.md)。
 
+## 自架一份
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/andy78644/dcmoney)
+
+按鈕會把這個 repo clone 到你的 GitHub、在你的 Cloudflare 帳號建立 Worker 與
+D1、套用 migration，並接上 Workers Builds 做後續自動部署。過程中會請你填入
+`DISCORD_PUBLIC_KEY`。
+
+部署完成後仍需自行完成 Discord 端設定：把 Interactions Endpoint URL 指向
+`<你的 worker 網址>/interactions`、註冊 slash commands、把 application 安裝到
+伺服器。步驟見下方[設定與部署 Discord Bot](#設定與部署-discord-bot)。
+
+D1 的位置建議選擇離 Discord 伺服器近的區域，理由見
+[開發進度](docs/PROGRESS.md)的效能一節。
+
 ## 功能
 
 - 多帳本與帳本成員權限。
@@ -93,6 +108,10 @@ npm run verify
    ```
 
 專案使用 `migrations/` 版本化 D1 schema。不要直接在正式資料庫手動修改資料表。
+
+`npm run deploy` 會先套用 migration 再部署，因此正式環境的 schema 不會落後於
+程式碼。migration 指令引用的是 binding 名稱 `DB` 而非資料庫名稱，這樣別人自架
+時即使資料庫取了別的名字也能運作。
 
 ## 設定與部署 Discord Bot
 

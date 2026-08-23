@@ -78,10 +78,21 @@ Discord 位於美國的伺服器，Worker 因此固定在 ATL 執行。
 一筆支出最多 25 位分攤成員，一次最多加入 25 位帳本成員，兩者都是 Discord
 元件的上限。帳本幣別在建立時固定，內建 TWD、JPY、USD、EUR。
 
+## 自架支援
+
+README 提供 Deploy to Cloudflare 按鈕。`package.json` 的 `deploy` script 會先跑
+`wrangler d1 migrations apply DB --remote` 再部署，Cloudflare 會自動採用它，
+所以一鍵部署的人不會拿到空資料庫。
+
+migration 指令引用 binding 名稱 `DB` 而非資料庫名稱，因為對方建立的資料庫可能
+叫別的名字。`verify` 則刻意直接呼叫 `wrangler deploy --dry-run` 而不經過 `deploy`
+script，否則 CI 會在沒有憑證的情況下嘗試套用遠端 migration 而失敗。
+
 ## 已知待辦
 
 - 修改紀錄的表單仍以 Discord user ID 文字輸入，因為 Discord modal 只支援文字欄位。
-- 專案沒有 git remote，所有 commit 只存在於本機。
+- 舊帳號誤建的 repo 已刪除，remote 現為 `git@github.com:andy78644/dcmoney.git`（SSH，
+  因為 HTTPS token 缺 `workflow` scope 無法推送含 CI 設定的歷史）。
 - 舊的 `dcmoney`（HKG）資料庫尚未刪除，確認新資料庫穩定後可移除。
 
 ## 相關文件

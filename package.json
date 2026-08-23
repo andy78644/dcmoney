@@ -6,15 +6,15 @@
   "scripts": {
     "check": "npm run types && npm run typecheck && npm test",
     "commands:register": "tsx scripts/register-commands.ts",
-    "db:migrate:local": "wrangler d1 migrations apply dcmoney-us --local",
-    "db:migrate:remote": "wrangler d1 migrations apply dcmoney-us --remote",
-    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run db:migrate:remote && wrangler deploy",
     "dev": "wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types",
-    "verify": "npm run check && npm run deploy -- --dry-run"
+    "verify": "npm run check && wrangler deploy --dry-run"
   },
   "engines": {
     "node": ">=20"
