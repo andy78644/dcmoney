@@ -15,7 +15,7 @@ import {
   startBalances,
   startExpenses,
 } from "./query-handler";
-import { ephemeral } from "./responses";
+import { autocomplete, ephemeral } from "./responses";
 import type { DiscordInteraction } from "./types";
 
 const applicationMessages: Record<string, string> = {
@@ -94,7 +94,20 @@ export async function routeInteraction(
     }
     return ephemeral("目前不支援這個操作。");
   } catch (error) {
+    // Autocomplete only accepts a type 8 reply, so an error reply would be
+    // rejected by Discord and surface as a broken picker. Fail closed with an
+    // empty list instead, and log it: these used to be swallowed silently.
+    const isAutocomplete = interaction.type === 4;
     if (error instanceof ApplicationError) {
+      console.warn("Application error", {
+        code: error.code,
+        interactionType: interaction.type,
+        command: interaction.data?.name,
+        customId: interaction.data?.custom_id,
+      });
+      if (isAutocomplete) {
+        return autocomplete([]);
+      }
       const base = applicationMessages[error.code] ?? "操作失敗，請稍後再試。";
       const named = error.userIds
         .map((userId) => `<@${userId}>`)
@@ -102,9 +115,20 @@ export async function routeInteraction(
       return ephemeral(named === "" ? base : `${base}\n未加入：${named}`);
     }
     if (error instanceof DomainError) {
+      console.warn("Domain error", {
+        message: error.message,
+        interactionType: interaction.type,
+        command: interaction.data?.name,
+      });
+      if (isAutocomplete) {
+        return autocomplete([]);
+      }
       return ephemeral("帳務資料不正確，請檢查金額與分攤方式。");
     }
     console.error("Unhandled interaction error", error);
+    if (isAutocomplete) {
+      return autocomplete([]);
+    }
     return ephemeral("系統暫時無法完成操作，請稍後再試。");
   }
 }

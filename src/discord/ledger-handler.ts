@@ -107,6 +107,12 @@ export async function handleLedgerAutocomplete(
   const guildId = requireGuildId(interaction);
   const actorUserId = requireActorUserId(interaction);
   const focused = findFocusedOption(interaction.data?.options);
+  console.log("autocomplete", {
+    command: interaction.data?.name,
+    focused: focused?.name ?? null,
+    ledgerChosen:
+      findOptionValue(interaction.data?.options, "ledger") !== undefined,
+  });
   if (focused === undefined) {
     return autocomplete([]);
   }
