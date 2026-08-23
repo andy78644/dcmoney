@@ -2,6 +2,7 @@ import {
   LedgerService,
   memberLabel,
 } from "../application/ledger-service";
+import { SessionService } from "../application/session-service";
 import { TransactionService } from "../application/transaction-service";
 import { formatMinorAmount } from "../domain/money";
 import { currencyChoices } from "./command-definitions";
@@ -10,18 +11,22 @@ import {
   findOptionValue,
   getSubcommand,
   optionalBoolean,
+  optionalString,
   requiredString,
   requireActorUserId,
   requireGuildId,
   resolvedDisplayName,
   actorDisplayName,
 } from "./options";
-import { autocomplete, ephemeral } from "./responses";
+import { autocomplete, ephemeral, updateMessage } from "./responses";
 import type { DiscordInteraction } from "./types";
 
 // 這些欄位的候選項目是帳本成員，不是整個伺服器的人。
 // `ledger member add` 的 user 欄位刻意不在此列 —— 加人時本來就要從全伺服器挑。
 const MEMBER_OPTION_NAMES = new Set(["payer", "receiver", "member", "user"]);
+
+// Discord 的 user select 一次最多 25 位。
+const MAX_BULK_MEMBERS = 25;
 
 export async function handleLedgerCommand(
   interaction: DiscordInteraction,
@@ -97,18 +102,50 @@ export async function handleLedgerCommand(
 
   if (command.group === "member" && ["add", "remove"].includes(command.name)) {
     const ledgerId = requiredString(command.options, "ledger");
-    const memberUserId = requiredString(command.options, "user");
     if (command.name === "add") {
+      const single = optionalString(command.options, "user");
+      if (single === undefined) {
+        // 沒指定人就開多選；成員清單交給 Discord 的 user select。
+        const ledger = await service.requireOwner(
+          ledgerId,
+          guildId,
+          actorUserId,
+        );
+        const session = await new SessionService(db).create({
+          guildId,
+          userId: actorUserId,
+          kind: "member",
+          state: { ledgerId, ledgerName: ledger.name },
+        });
+        return ephemeral(
+          `選擇要加入「${ledger.name}」的成員，一次最多 ${MAX_BULK_MEMBERS} 位。`,
+          [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 5,
+                  custom_id: `member_add:${session.id}`,
+                  placeholder: "選擇成員",
+                  min_values: 1,
+                  max_values: MAX_BULK_MEMBERS,
+                },
+              ],
+            },
+          ],
+        );
+      }
       await service.addMember({
         interactionId: interaction.id,
         ledgerId,
         guildId,
         actorUserId,
-        memberUserId,
-        displayName: resolvedDisplayName(interaction, memberUserId),
+        memberUserId: single,
+        displayName: resolvedDisplayName(interaction, single),
       });
-      return ephemeral(`已將 <@${memberUserId}> 加入帳本。`);
+      return ephemeral(`已將 <@${single}> 加入帳本。`);
     }
+    const memberUserId = requiredString(command.options, "user");
     await service.removeMember({
       interactionId: interaction.id,
       ledgerId,
@@ -120,6 +157,52 @@ export async function handleLedgerCommand(
   }
 
   return ephemeral("不支援這個帳本操作。");
+}
+
+export async function handleMemberComponent(
+  interaction: DiscordInteraction,
+  db: D1Database,
+): Promise<Response> {
+  const sessionId = (interaction.data?.custom_id ?? "").split(":")[1];
+  if (sessionId === undefined) {
+    return ephemeral("這個成員選單已失效，請重新執行 /ledger member add。");
+  }
+  const session = await new SessionService(db).require<{
+    ledgerId: string;
+    ledgerName: string;
+  }>({
+    id: sessionId,
+    guildId: requireGuildId(interaction),
+    userId: requireActorUserId(interaction),
+    kind: "member",
+  });
+  const selected = interaction.data?.values ?? [];
+  if (selected.length === 0) {
+    return updateMessage("沒有選到任何成員。");
+  }
+  const { added, alreadyMembers } = await new LedgerService(db).addMembers({
+    interactionId: interaction.id,
+    ledgerId: session.state.ledgerId,
+    guildId: session.guildId,
+    actorUserId: session.userId,
+    members: selected.map((userId) => ({
+      userId,
+      displayName: resolvedDisplayName(interaction, userId),
+    })),
+  });
+  await new SessionService(db).delete(sessionId);
+
+  const mention = (userId: string) => `<@${userId}>`;
+  const lines: string[] = [];
+  if (added.length > 0) {
+    lines.push(
+      `已將 ${added.map(mention).join("、")} 加入「${session.state.ledgerName}」。`,
+    );
+  }
+  if (alreadyMembers.length > 0) {
+    lines.push(`已在帳本內，略過：${alreadyMembers.map(mention).join("、")}`);
+  }
+  return updateMessage(lines.join("\n"));
 }
 
 export async function handleLedgerAutocomplete(

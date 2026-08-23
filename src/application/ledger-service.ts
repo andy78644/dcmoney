@@ -235,6 +235,82 @@ export class LedgerService {
     return ledger;
   }
 
+  /**
+   * Adds several members in one round trip.
+   *
+   * Members already in the ledger are reported rather than treated as an
+   * error: in a bulk add a duplicate is a no-op, and letting it abort would
+   * discard everyone else in the same selection.
+   */
+  async addMembers(input: {
+    interactionId: string;
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    members: ReadonlyArray<{ userId: string; displayName?: string | undefined }>;
+  }): Promise<{ added: string[]; alreadyMembers: string[] }> {
+    await this.requireOwner(input.ledgerId, input.guildId, input.actorUserId);
+    for (const { userId } of input.members) {
+      assertDiscordId(userId, "Member user ID");
+    }
+
+    const existing = new Set(await this.listMemberIds(input.ledgerId));
+    const seen = new Set<string>();
+    const added: typeof input.members[number][] = [];
+    const alreadyMembers: string[] = [];
+    for (const member of input.members) {
+      if (seen.has(member.userId)) {
+        continue;
+      }
+      seen.add(member.userId);
+      if (existing.has(member.userId)) {
+        alreadyMembers.push(member.userId);
+      } else {
+        added.push(member);
+      }
+    }
+    if (added.length === 0) {
+      return { added: [], alreadyMembers };
+    }
+
+    const createdAt = this.#dependencies.now().toISOString();
+    try {
+      await this.#db.batch([
+        this.#db
+          .prepare(
+            `INSERT INTO interaction_receipts
+              (interaction_id, operation, created_at)
+             VALUES (?, 'ledger.member.add', ?)`,
+          )
+          .bind(input.interactionId, createdAt),
+        ...added.map(({ userId, displayName }) =>
+          this.#db
+            .prepare(
+              `INSERT INTO ledger_members
+                (ledger_id, user_id, added_by, created_at, display_name)
+               VALUES (?, ?, ?, ?, ?)`,
+            )
+            .bind(
+              input.ledgerId,
+              userId,
+              input.actorUserId,
+              createdAt,
+              displayName ?? null,
+            ),
+        ),
+      ]);
+    } catch (error) {
+      if (await this.#hasReceipt(input.interactionId)) {
+        throw new ApplicationError(
+          "DUPLICATE_INTERACTION",
+          "This interaction has already been processed.",
+        );
+      }
+      throw error;
+    }
+    return { added: added.map(({ userId }) => userId), alreadyMembers };
+  }
+
   async setPublic(input: {
     ledgerId: string;
     guildId: string;

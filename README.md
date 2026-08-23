@@ -25,7 +25,7 @@
 | --- | --- |
 | `/ledger create` | 建立帳本並選擇幣別 |
 | `/ledger list` | 列出自己可以使用的帳本 |
-| `/ledger member add` | 建立者加入帳本成員 |
+| `/ledger member add` | 建立者加入帳本成員；不指定 user 會開多選，一次最多 25 位 |
 | `/ledger member remove` | 建立者移除帳本成員 |
 | `/ledger public` | 建立者切換帳本是否公開記帳動態 |
 | `/expense add` | 透過引導流程新增平均或指定金額分攤；`public` 可單筆公開 |

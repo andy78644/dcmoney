@@ -1,6 +1,10 @@
 import { DomainError } from "../domain/errors";
 import { ApplicationError } from "../application/errors";
-import { handleLedgerAutocomplete, handleLedgerCommand } from "./ledger-handler";
+import {
+  handleLedgerAutocomplete,
+  handleLedgerCommand,
+  handleMemberComponent,
+} from "./ledger-handler";
 import {
   handleExpenseComponent,
   handleExpenseModal,
@@ -57,6 +61,12 @@ export async function routeInteraction(
     }
     if (interaction.type === 4) {
       return await handleLedgerAutocomplete(interaction, env.DB);
+    }
+    if (
+      interaction.type === 3 &&
+      interaction.data?.custom_id?.startsWith("member_") === true
+    ) {
+      return await handleMemberComponent(interaction, env.DB);
     }
     if (
       interaction.type === 3 &&

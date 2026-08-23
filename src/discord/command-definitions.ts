@@ -47,8 +47,8 @@ const memberSubcommands = [
       {
         type: userOption,
         name: "user",
-        description: "Discord 成員",
-        required: true,
+        description: "只加一位時可直接指定；留空會開啟多選選單",
+        required: false,
       },
     ],
   },
