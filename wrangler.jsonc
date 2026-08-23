@@ -6,8 +6,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "dcmoney",
-      "database_id": "2c79e251-6c87-458a-bf71-b2ebd152c11e",
+      "database_name": "dcmoney-us",
+      "database_id": "859cf988-91cd-4746-bf8b-d017a7883809",
       "migrations_dir": "migrations"
     }
   ],

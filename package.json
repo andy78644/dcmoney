@@ -6,8 +6,8 @@
   "scripts": {
     "check": "npm run types && npm run typecheck && npm test",
     "commands:register": "tsx scripts/register-commands.ts",
-    "db:migrate:local": "wrangler d1 migrations apply dcmoney --local",
-    "db:migrate:remote": "wrangler d1 migrations apply dcmoney --remote",
+    "db:migrate:local": "wrangler d1 migrations apply dcmoney-us --local",
+    "db:migrate:remote": "wrangler d1 migrations apply dcmoney-us --remote",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "test": "vitest run",
