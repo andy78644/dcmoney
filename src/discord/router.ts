@@ -45,7 +45,7 @@ export async function routeInteraction(
 ): Promise<Response> {
   try {
     if (interaction.type === 2 && interaction.data?.name === "ledger") {
-      return await handleLedgerCommand(interaction, env.DB);
+      return await handleLedgerCommand(interaction, env.DB, ctx);
     }
     if (interaction.type === 2 && interaction.data?.name === "expense") {
       return await startExpense(interaction, env.DB);
@@ -66,7 +66,7 @@ export async function routeInteraction(
       interaction.type === 3 &&
       interaction.data?.custom_id?.startsWith("member_") === true
     ) {
-      return await handleMemberComponent(interaction, env.DB);
+      return await handleMemberComponent(interaction, env.DB, ctx);
     }
     if (
       interaction.type === 3 &&

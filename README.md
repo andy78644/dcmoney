@@ -16,6 +16,7 @@
 - revision conflict、軟刪除、audit trail、Interaction 冪等與帳本餘額版本鎖。
 - 所有帳務畫面預設為 Discord ephemeral response。
 - 公開帳本會把記帳、還款、修改與刪除公告到頻道，讓成員知道誰動了帳。
+- 加入成員時會在頻道通知並提及對方，這是唯一會真的 ping 人的訊息。
 
 分攤成員從只列出帳本成員的選單挑選，一筆支出最多 25 位。每個帳本只能使用一種幣別；第一版內建 TWD、JPY、USD、EUR，不處理匯率。
 
@@ -27,6 +28,7 @@
 | `/ledger list` | 列出自己可以使用的帳本 |
 | `/ledger member add` | 建立者加入帳本成員；不指定 user 會開多選，一次最多 25 位 |
 | `/ledger member remove` | 建立者移除帳本成員 |
+| `/ledger member list` | 列出帳本成員與建立者 |
 | `/ledger public` | 建立者切換帳本是否公開記帳動態 |
 | `/expense add` | 透過引導流程新增平均或指定金額分攤；`public` 可單筆公開 |
 | `/expenses` | 依成員、日期、類型及頁碼查詢紀錄 |

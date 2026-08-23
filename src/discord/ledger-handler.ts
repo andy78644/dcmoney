@@ -5,6 +5,7 @@ import {
 import { SessionService } from "../application/session-service";
 import { TransactionService } from "../application/transaction-service";
 import { formatMinorAmount } from "../domain/money";
+import { announce, memberAddedAnnouncement } from "./announce";
 import { currencyChoices } from "./command-definitions";
 import {
   findFocusedOption,
@@ -31,6 +32,7 @@ const MAX_BULK_MEMBERS = 25;
 export async function handleLedgerCommand(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const guildId = requireGuildId(interaction);
   const actorUserId = requireActorUserId(interaction);
@@ -100,6 +102,26 @@ export async function handleLedgerCommand(
     );
   }
 
+  if (command.group === "member" && command.name === "list") {
+    const ledgerId = requiredString(command.options, "ledger");
+    const ledger = await service.requireMember(ledgerId, guildId, actorUserId);
+    const members = await service.listMembers(ledgerId);
+    const lines = members.map((member, index) => {
+      const isOwner = member.userId === ledger.ownerUserId;
+      return `${index + 1}. <@${member.userId}>${
+        member.displayName === null ? "" : `（${member.displayName}）`
+      }${isOwner ? " · 建立者" : ""}`;
+    });
+    return ephemeral(
+      [
+        `「${ledger.name}」共 ${members.length} 位成員${
+          ledger.isPublic ? "，記帳動態公開" : ""
+        }：`,
+        ...lines,
+      ].join("\n"),
+    );
+  }
+
   if (command.group === "member" && ["add", "remove"].includes(command.name)) {
     const ledgerId = requiredString(command.options, "ledger");
     if (command.name === "add") {
@@ -135,6 +157,7 @@ export async function handleLedgerCommand(
           ],
         );
       }
+      const ledger = await service.requireOwner(ledgerId, guildId, actorUserId);
       await service.addMember({
         interactionId: interaction.id,
         ledgerId,
@@ -143,7 +166,17 @@ export async function handleLedgerCommand(
         memberUserId: single,
         displayName: resolvedDisplayName(interaction, single),
       });
-      return ephemeral(`已將 <@${single}> 加入帳本。`);
+      announce(
+        interaction,
+        memberAddedAnnouncement({
+          actorUserId,
+          ledgerName: ledger.name,
+          memberUserIds: [single],
+        }),
+        ctx,
+        [single],
+      );
+      return ephemeral(`已將 <@${single}> 加入帳本，已在頻道通知對方。`);
     }
     const memberUserId = requiredString(command.options, "user");
     await service.removeMember({
@@ -162,6 +195,7 @@ export async function handleLedgerCommand(
 export async function handleMemberComponent(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const sessionId = (interaction.data?.custom_id ?? "").split(":")[1];
   if (sessionId === undefined) {
@@ -192,11 +226,26 @@ export async function handleMemberComponent(
   });
   await new SessionService(db).delete(sessionId);
 
+  if (added.length > 0) {
+    announce(
+      interaction,
+      memberAddedAnnouncement({
+        actorUserId: session.userId,
+        ledgerName: session.state.ledgerName,
+        memberUserIds: added,
+      }),
+      ctx,
+      added,
+    );
+  }
+
   const mention = (userId: string) => `<@${userId}>`;
   const lines: string[] = [];
   if (added.length > 0) {
     lines.push(
-      `已將 ${added.map(mention).join("、")} 加入「${session.state.ledgerName}」。`,
+      `已將 ${added.map(mention).join("、")} 加入「${
+        session.state.ledgerName
+      }」，已在頻道通知對方。`,
     );
   }
   if (alreadyMembers.length > 0) {

@@ -58,6 +58,12 @@ const memberSubcommands = [
     description: "移除帳本成員",
     options: [ledgerOption, memberOption("user", "帳本成員", true)],
   },
+  {
+    type: subcommand,
+    name: "list",
+    description: "列出帳本成員",
+    options: [ledgerOption],
+  },
 ];
 
 export const commandDefinitions = [

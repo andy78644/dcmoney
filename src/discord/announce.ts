@@ -56,6 +56,18 @@ export function settlementAnnouncement(input: {
   ].join("\n");
 }
 
+export function memberAddedAnnouncement(input: {
+  actorUserId: string;
+  ledgerName: string;
+  memberUserIds: readonly string[];
+}): string {
+  const who = input.memberUserIds.map((id) => `<@${id}>`).join("、");
+  return [
+    `👥 <@${input.actorUserId}> 把 ${who} 加入了帳本「${input.ledgerName}」`,
+    "用 `/balances` 查看欠款，`/expense add` 記帳。",
+  ].join("\n");
+}
+
 export function changeAnnouncement(input: {
   actorUserId: string;
   ledgerName: string;
@@ -89,6 +101,7 @@ export function announce(
   interaction: DiscordInteraction,
   content: string,
   ctx?: ExecutionContext,
+  mentionUserIds: readonly string[] = [],
 ): void {
   const { token, application_id: applicationId } = interaction;
   if (
@@ -105,7 +118,12 @@ export function announce(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         content,
-        allowed_mentions: { parse: [] },
+        // Mentions stay inert unless a recipient genuinely needs the ping —
+        // being added to a ledger is the one case they cannot discover alone.
+        allowed_mentions:
+          mentionUserIds.length === 0
+            ? { parse: [] }
+            : { parse: [], users: [...mentionUserIds] },
       }),
     },
   ).then(async (response) => {

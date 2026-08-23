@@ -5,6 +5,7 @@ import { LedgerService } from "../../src/application/ledger-service";
 import {
   changeAnnouncement,
   expenseAnnouncement,
+  memberAddedAnnouncement,
   settlementAnnouncement,
 } from "../../src/discord/announce";
 import { routeInteraction } from "../../src/discord/router";
@@ -201,5 +202,17 @@ describe("per-command public flag", () => {
     expect(JSON.parse(row?.state_json ?? "{}")).toMatchObject({
       announcePublicly: true,
     });
+  });
+});
+
+describe("member added announcement", () => {
+  it("names everyone added and points them at the next step", () => {
+    const text = memberAddedAnnouncement({
+      actorUserId: "111",
+      ledgerName: "旅遊",
+      memberUserIds: ["222", "333"],
+    });
+    expect(text).toContain("<@111> 把 <@222>、<@333> 加入了帳本「旅遊」");
+    expect(text).toContain("/balances");
   });
 });

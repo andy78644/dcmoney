@@ -164,3 +164,86 @@ describe("bulk member add", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
+
+describe("member list", () => {
+  it("lists everyone with display names and marks the owner", async () => {
+    const { guildId, owner, ledger } = await fixture();
+    const ledgers = new LedgerService(env.DB);
+    const friend = `5590${sequence}`;
+    await ledgers.addMember({
+      interactionId: `list-m-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: owner,
+      memberUserId: friend,
+      displayName: "小明",
+    });
+
+    const listed = await reply(
+      await routeInteraction(
+        {
+          id: `list-cmd-${++sequence}`,
+          type: 2,
+          guild_id: guildId,
+          member: { user: { id: friend } },
+          data: {
+            name: "ledger",
+            options: [
+              {
+                name: "member",
+                type: 2,
+                options: [
+                  {
+                    name: "list",
+                    type: 1,
+                    options: [{ name: "ledger", type: 3, value: ledger.id }],
+                  },
+                ],
+              },
+            ],
+          },
+        } as never,
+        env,
+      ),
+    );
+
+    const content = listed.data?.content ?? "";
+    expect(content).toContain("共 2 位成員");
+    expect(content).toContain(`<@${owner}>`);
+    expect(content).toContain("· 建立者");
+    expect(content).toContain(`<@${friend}>（小明）`);
+  });
+
+  it("refuses someone who is not in the ledger", async () => {
+    const { guildId, ledger } = await fixture();
+    const outsider = `5595${sequence}`;
+    const refused = await reply(
+      await routeInteraction(
+        {
+          id: `list-deny-${++sequence}`,
+          type: 2,
+          guild_id: guildId,
+          member: { user: { id: outsider } },
+          data: {
+            name: "ledger",
+            options: [
+              {
+                name: "member",
+                type: 2,
+                options: [
+                  {
+                    name: "list",
+                    type: 1,
+                    options: [{ name: "ledger", type: 3, value: ledger.id }],
+                  },
+                ],
+              },
+            ],
+          },
+        } as never,
+        env,
+      ),
+    );
+    expect(refused.data?.content).toContain("沒有權限");
+  });
+});
