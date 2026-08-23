@@ -18,6 +18,8 @@ interface ResponsePayload {
   data?: {
     content?: string;
     custom_id?: string;
+    flags?: number;
+    allowed_mentions?: { parse: string[] };
     components?: Array<{ components?: Component[] }>;
   };
 }
@@ -493,5 +495,96 @@ describe("Taipei date default", () => {
     expect(todayInTaipei(new Date("2026-08-17T16:30:00.000Z"))).toBe(
       "2026-08-18",
     );
+  });
+});
+
+async function balanceFixture() {
+  const guildId = `7710${++sequence}`;
+  const ownerUserId = `7720${sequence}`;
+  const memberA = `7730${sequence}`;
+  const ledgers = new LedgerService(env.DB);
+  const ledger = await ledgers.create({
+    interactionId: `pub-ledger-${sequence}`,
+    guildId,
+    actorUserId: ownerUserId,
+    name: `Public ${sequence}`,
+    currencyCode: "TWD",
+    currencyScale: 0,
+  });
+  await ledgers.addMember({
+    interactionId: `pub-member-${sequence}`,
+    ledgerId: ledger.id,
+    guildId,
+    actorUserId: ownerUserId,
+    memberUserId: memberA,
+  });
+  await new TransactionService(env.DB).createExpense({
+    interactionId: `pub-expense-${sequence}`,
+    ledgerId: ledger.id,
+    guildId,
+    actorUserId: ownerUserId,
+    payerUserId: ownerUserId,
+    totalAmountMinor: 200,
+    shares: [
+      { userId: ownerUserId, amountMinor: 100 },
+      { userId: memberA, amountMinor: 100 },
+    ],
+    occurredOn: "2026-08-24",
+  });
+  return { guildId, ownerUserId, memberA, ledger };
+}
+
+function balancesCommand(
+  guildId: string,
+  userId: string,
+  ledgerId: string,
+  isPublic: boolean,
+) {
+  return {
+    id: `pub-cmd-${++sequence}`,
+    type: 2,
+    guild_id: guildId,
+    member: { user: { id: userId } },
+    data: {
+      name: "balances",
+      options: [
+        { name: "ledger", type: 3, value: ledgerId },
+        { name: "public", type: 5, value: isPublic },
+      ],
+    },
+  } as never;
+}
+
+describe("public balances", () => {
+  it("drops the ephemeral flag and the settle controls when public", async () => {
+    const { guildId, ownerUserId, memberA, ledger } = await balanceFixture();
+
+    const privateReply = await payload(
+      await routeInteraction(
+        balancesCommand(guildId, ownerUserId, ledger.id, false),
+        env,
+      ),
+    );
+    const publicReply = await payload(
+      await routeInteraction(
+        balancesCommand(guildId, ownerUserId, ledger.id, true),
+        env,
+      ),
+    );
+
+    // 64 is the ephemeral flag.
+    expect(privateReply.data?.flags).toBe(64);
+    expect(publicReply.data?.flags).toBeUndefined();
+
+    // Same numbers either way.
+    expect(publicReply.data?.content).toContain(`<@${memberA}>`);
+    expect(publicReply.data?.content).toBe(privateReply.data?.content);
+
+    // The private reply keeps the settle picker; the public one is read-only.
+    expect(privateReply.data?.components?.length).toBeGreaterThan(0);
+    expect(publicReply.data?.components ?? []).toHaveLength(0);
+
+    // Mentions must stay inert once the message is visible to the channel.
+    expect(publicReply.data?.allowed_mentions).toEqual({ parse: [] });
   });
 });

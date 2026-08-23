@@ -1,6 +1,7 @@
 const stringOption = 3;
 const userOption = 6;
 const integerOption = 4;
+const booleanOption = 5;
 const subcommand = 1;
 const subcommandGroup = 2;
 
@@ -87,6 +88,12 @@ export const commandDefinitions = [
             required: true,
             choices: currencyChoices,
           },
+          {
+            type: booleanOption,
+            name: "public",
+            description: "記帳、還款、修改與刪除都公開到頻道（預設關閉）",
+            required: false,
+          },
         ],
       },
       {
@@ -99,6 +106,20 @@ export const commandDefinitions = [
         name: "member",
         description: "管理帳本成員",
         options: memberSubcommands,
+      },
+      {
+        type: subcommand,
+        name: "public",
+        description: "切換帳本是否公開記帳動態（限建立者）",
+        options: [
+          ledgerOption,
+          {
+            type: booleanOption,
+            name: "enabled",
+            description: "開啟或關閉公開",
+            required: true,
+          },
+        ],
       },
     ],
   },
@@ -143,6 +164,12 @@ export const commandDefinitions = [
             type: stringOption,
             name: "date",
             description: "消費日期（YYYY-MM-DD，預設今天）",
+            required: false,
+          },
+          {
+            type: booleanOption,
+            name: "public",
+            description: "這筆公開到頻道（帳本已設公開時一律公開）",
             required: false,
           },
         ],
@@ -204,6 +231,12 @@ export const commandDefinitions = [
         required: false,
       },
       memberOption("member", "只顯示與這位成員有關的建議", false),
+      {
+        type: booleanOption,
+        name: "public",
+        description: "公開顯示給頻道所有人看（預設只有自己看得到）",
+        required: false,
+      },
     ],
   },
   {
@@ -235,6 +268,12 @@ export const commandDefinitions = [
         description: "備註",
         required: false,
         max_length: 200,
+      },
+      {
+        type: booleanOption,
+        name: "public",
+        description: "這筆公開到頻道（帳本已設公開時一律公開）",
+        required: false,
       },
     ],
   },

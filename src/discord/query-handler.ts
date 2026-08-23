@@ -8,14 +8,25 @@ import {
 import { formatMinorAmount, parsePositiveAmountToMinor } from "../domain/money";
 import { todayInTaipei } from "./date";
 import {
+  announce,
+  changeAnnouncement,
+  settlementAnnouncement,
+} from "./announce";
+import {
   modalValue,
   optionalInteger,
+  optionalBoolean,
   optionalString,
   requiredString,
   requireActorUserId,
   requireGuildId,
 } from "./options";
-import { ephemeral, modal, updateMessage } from "./responses";
+import {
+  ephemeral,
+  modal,
+  publicMessage,
+  updateMessage,
+} from "./responses";
 import type { DiscordInteraction } from "./types";
 
 interface HistorySessionState {
@@ -288,6 +299,7 @@ async function requireHistorySession(
 export async function handleHistoryComponent(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const [action, sessionId, transactionIdFromAction, revisionText] = (
     interaction.data?.custom_id ?? ""
@@ -465,7 +477,15 @@ export async function handleHistoryComponent(
     if (!Number.isInteger(revision)) {
       return updateMessage("紀錄版本無效，請重新載入。");
     }
-    await new TransactionService(db).delete({
+    const service = new TransactionService(db);
+    // 讀在刪除之前，否則公告拿不到金額與說明。
+    const removed = await service.get({
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      transactionId: transactionIdFromAction,
+    });
+    await service.delete({
       interactionId: interaction.id,
       ledgerId: session.state.ledgerId,
       guildId: session.guildId,
@@ -473,6 +493,16 @@ export async function handleHistoryComponent(
       transactionId: transactionIdFromAction,
       expectedRevision: revision,
     });
+    await announceChange(
+      interaction,
+      db,
+      session,
+      "delete",
+      removed.description,
+      removed.totalAmountMinor,
+      removed.occurredOn,
+      ctx,
+    );
     session.state.transactionIds = session.state.transactionIds.filter(
       (id) => id !== transactionIdFromAction,
     );
@@ -492,6 +522,7 @@ export async function handleHistoryComponent(
 export async function handleHistoryModal(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const [action, sessionId, transactionId, revisionText] = (
     interaction.data?.custom_id ?? ""
@@ -554,6 +585,22 @@ export async function handleHistoryModal(
       occurredOn: modalValue(interaction, "date"),
     });
   }
+  const updated = await service.get({
+    ledgerId: session.state.ledgerId,
+    guildId: session.guildId,
+    actorUserId: session.userId,
+    transactionId,
+  });
+  await announceChange(
+    interaction,
+    db,
+    session,
+    "update",
+    updated.description,
+    updated.totalAmountMinor,
+    updated.occurredOn,
+    ctx,
+  );
   return updateMessage("已更新紀錄並重新計算帳本餘額。", [
     actionRow({
       type: 2,
@@ -623,6 +670,7 @@ export async function startBalances(
   );
   const asOf = optionalString(options, "as_of");
   const memberUserId = optionalString(options, "member");
+  const isPublic = optionalBoolean(options, "public");
   const suggestions = await new TransactionService(db).getSuggestions({
     ledgerId,
     guildId,
@@ -637,12 +685,21 @@ export async function startBalances(
     currencyScale: ledger.currencyScale,
     suggestions,
   };
+  const content =
+    asOf === undefined
+      ? balanceContent(state)
+      : balanceContent(state).replace(
+          "簡化後欠款",
+          `截至 ${asOf} 的簡化欠款`,
+        );
+
+  // 公開與歷史檢視都是唯讀：結算元件綁定發起人的 session，
+  // 掛在別人也看得到的訊息上只會讓其他人按了拿到錯誤。
+  if (isPublic) {
+    return publicMessage(content);
+  }
   if (asOf !== undefined) {
-    const historical = balanceContent(state).replace(
-      "簡化後欠款",
-      `截至 ${asOf} 的簡化欠款`,
-    );
-    return ephemeral(historical);
+    return ephemeral(content);
   }
   const session = await new SessionService(db).create({
     guildId,
@@ -672,6 +729,7 @@ async function requireBalanceSession(
 export async function handleBalanceComponent(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const [action, sessionId, indexText] = (
     interaction.data?.custom_id ?? ""
@@ -761,6 +819,7 @@ export async function handleBalanceComponent(
       session,
       suggestion,
       suggestion.amountMinor,
+      ctx,
     );
     await new SessionService(db).delete(sessionId);
     return updateMessage("已記錄全部還款，這筆建議已結清。");
@@ -771,6 +830,7 @@ export async function handleBalanceComponent(
 export async function handleBalanceModal(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const [action, sessionId, indexText] = (
     interaction.data?.custom_id ?? ""
@@ -804,13 +864,48 @@ export async function handleBalanceModal(
   );
 }
 
+async function announceChange(
+  interaction: DiscordInteraction,
+  db: D1Database,
+  session: { state: HistorySessionState; guildId: string; userId: string },
+  action: "update" | "delete",
+  description: string,
+  totalAmountMinor: number,
+  occurredOn: string,
+  ctx?: ExecutionContext,
+): Promise<void> {
+  const ledger = await new LedgerService(db).requireMember(
+    session.state.ledgerId,
+    session.guildId,
+    session.userId,
+  );
+  if (!ledger.isPublic) {
+    return;
+  }
+  announce(
+    interaction,
+    changeAnnouncement({
+      actorUserId: session.userId,
+      ledgerName: session.state.ledgerName,
+      action,
+      description,
+      totalAmountMinor,
+      occurredOn,
+      currency: session.state,
+    }),
+    ctx,
+  );
+}
+
 async function createSuggestedSettlement(
   interaction: DiscordInteraction,
   db: D1Database,
   session: Awaited<ReturnType<typeof requireBalanceSession>>,
   suggestion: BalanceSessionState["suggestions"][number],
   amountMinor: number,
+  ctx?: ExecutionContext,
 ): Promise<void> {
+  const occurredOn = todayInTaipei();
   await new TransactionService(db).createSettlement({
     interactionId: interaction.id,
     ledgerId: session.state.ledgerId,
@@ -820,13 +915,34 @@ async function createSuggestedSettlement(
     receiverUserId: suggestion.creditorUserId,
     amountMinor,
     description: "還款",
-    occurredOn: todayInTaipei(),
+    occurredOn,
   });
+  const ledger = await new LedgerService(db).requireMember(
+    session.state.ledgerId,
+    session.guildId,
+    session.userId,
+  );
+  if (ledger.isPublic) {
+    announce(
+      interaction,
+      settlementAnnouncement({
+        actorUserId: session.userId,
+        ledgerName: session.state.ledgerName,
+        payerUserId: suggestion.debtorUserId,
+        receiverUserId: suggestion.creditorUserId,
+        amountMinor,
+        occurredOn,
+        currency: session.state,
+      }),
+      ctx,
+    );
+  }
 }
 
 export async function createDirectSettlement(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const guildId = requireGuildId(interaction);
   const actorUserId = requireActorUserId(interaction);
@@ -869,6 +985,21 @@ export async function createDirectSettlement(
     description: optionalString(options, "description") ?? "還款",
     occurredOn: optionalString(options, "date") ?? todayInTaipei(),
   });
+  if (ledger.isPublic || optionalBoolean(options, "public")) {
+    announce(
+      interaction,
+      settlementAnnouncement({
+        actorUserId,
+        ledgerName: ledger.name,
+        payerUserId: settlement.payerUserId,
+        receiverUserId: settlement.receiverUserId,
+        amountMinor: settlement.totalAmountMinor,
+        occurredOn: settlement.occurredOn,
+        currency: ledger,
+      }),
+      ctx,
+    );
+  }
   return ephemeral(
     `已記錄還款：<@${settlement.payerUserId}> → <@${
       settlement.receiverUserId

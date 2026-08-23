@@ -35,6 +35,8 @@ export interface InteractionData {
 export interface DiscordInteraction {
   id: string;
   type: number;
+  token?: string;
+  application_id?: string;
   guild_id?: string;
   member?: { user: DiscordUser; nick?: string | null };
   user?: DiscordUser;

@@ -37,6 +37,7 @@ const applicationMessages: Record<string, string> = {
 export async function routeInteraction(
   interaction: DiscordInteraction,
   env: Env,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   try {
     if (interaction.type === 2 && interaction.data?.name === "ledger") {
@@ -52,7 +53,7 @@ export async function routeInteraction(
       return await startBalances(interaction, env.DB);
     }
     if (interaction.type === 2 && interaction.data?.name === "settle") {
-      return await createDirectSettlement(interaction, env.DB);
+      return await createDirectSettlement(interaction, env.DB, ctx);
     }
     if (interaction.type === 4) {
       return await handleLedgerAutocomplete(interaction, env.DB);
@@ -61,19 +62,19 @@ export async function routeInteraction(
       interaction.type === 3 &&
       interaction.data?.custom_id?.startsWith("expense_") === true
     ) {
-      return await handleExpenseComponent(interaction, env.DB);
+      return await handleExpenseComponent(interaction, env.DB, ctx);
     }
     if (
       interaction.type === 3 &&
       interaction.data?.custom_id?.startsWith("history_") === true
     ) {
-      return await handleHistoryComponent(interaction, env.DB);
+      return await handleHistoryComponent(interaction, env.DB, ctx);
     }
     if (
       interaction.type === 3 &&
       interaction.data?.custom_id?.startsWith("balance_") === true
     ) {
-      return await handleBalanceComponent(interaction, env.DB);
+      return await handleBalanceComponent(interaction, env.DB, ctx);
     }
     if (
       interaction.type === 5 &&
@@ -85,13 +86,13 @@ export async function routeInteraction(
       interaction.type === 5 &&
       interaction.data?.custom_id?.startsWith("balance_") === true
     ) {
-      return await handleBalanceModal(interaction, env.DB);
+      return await handleBalanceModal(interaction, env.DB, ctx);
     }
     if (
       interaction.type === 5 &&
       interaction.data?.custom_id?.startsWith("history_") === true
     ) {
-      return await handleHistoryModal(interaction, env.DB);
+      return await handleHistoryModal(interaction, env.DB, ctx);
     }
     return ephemeral("目前不支援這個操作。");
   } catch (error) {

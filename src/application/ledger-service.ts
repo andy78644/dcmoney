@@ -19,6 +19,7 @@ interface LedgerRow {
   balance_revision: number;
   created_at: string;
   archived_at: string | null;
+  is_public: number;
 }
 
 export interface Ledger {
@@ -31,6 +32,7 @@ export interface Ledger {
   balanceRevision: number;
   createdAt: string;
   archivedAt: string | null;
+  isPublic: boolean;
 }
 
 export interface CreateLedgerInput {
@@ -41,6 +43,7 @@ export interface CreateLedgerInput {
   currencyCode: string;
   currencyScale: number;
   displayName?: string | undefined;
+  isPublic?: boolean | undefined;
 }
 
 export interface LedgerMember {
@@ -64,6 +67,7 @@ function mapLedger(row: LedgerRow): Ledger {
     balanceRevision: row.balance_revision,
     createdAt: row.created_at,
     archivedAt: row.archived_at,
+    isPublic: row.is_public === 1,
   };
 }
 
@@ -115,8 +119,8 @@ export class LedgerService {
           .prepare(
             `INSERT INTO ledgers
               (id, guild_id, name, currency_code, currency_scale,
-               owner_user_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+               owner_user_id, created_at, is_public)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
@@ -126,6 +130,7 @@ export class LedgerService {
             input.currencyScale,
             input.actorUserId,
             createdAt,
+            input.isPublic === true ? 1 : 0,
           ),
         this.#db
           .prepare(
@@ -167,6 +172,7 @@ export class LedgerService {
       balanceRevision: 0,
       createdAt,
       archivedAt: null,
+      isPublic: input.isPublic === true,
     };
   }
 
@@ -227,6 +233,24 @@ export class LedgerService {
       );
     }
     return ledger;
+  }
+
+  async setPublic(input: {
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    isPublic: boolean;
+  }): Promise<Ledger> {
+    const ledger = await this.requireOwner(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    await this.#db
+      .prepare(`UPDATE ledgers SET is_public = ? WHERE id = ?`)
+      .bind(input.isPublic ? 1 : 0, input.ledgerId)
+      .run();
+    return { ...ledger, isPublic: input.isPublic };
   }
 
   async listMembers(ledgerId: string): Promise<LedgerMember[]> {

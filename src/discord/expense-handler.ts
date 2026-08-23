@@ -17,6 +17,7 @@ import {
 import {
   getSubcommand,
   modalValue,
+  optionalBoolean,
   optionalString,
   requiredString,
   requireActorUserId,
@@ -25,6 +26,7 @@ import {
 import { ephemeral, modal, updateMessage } from "./responses";
 import type { DiscordInteraction } from "./types";
 import { todayInTaipei } from "./date";
+import { announce, expenseAnnouncement } from "./announce";
 
 interface ExpenseSessionState {
   ledgerId: string;
@@ -36,6 +38,7 @@ interface ExpenseSessionState {
   splitMethod: "equal" | "custom";
   description: string;
   occurredOn: string;
+  announcePublicly?: boolean;
   participantUserIds?: string[];
   shares?: Share[];
   customAmounts?: number[];
@@ -187,6 +190,9 @@ export async function startExpense(
     splitMethod: split,
     description: optionalString(command.options, "description") ?? "",
     occurredOn: optionalString(command.options, "date") ?? todayInTaipei(),
+    ...(optionalBoolean(command.options, "public")
+      ? { announcePublicly: true }
+      : {}),
   };
   const session = await new SessionService(db).create({
     guildId,
@@ -211,6 +217,7 @@ export async function startExpense(
 export async function handleExpenseComponent(
   interaction: DiscordInteraction,
   db: D1Database,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const customId = interaction.data?.custom_id ?? "";
   const [action, sessionId, indexText] = customId.split(":");
@@ -291,6 +298,27 @@ export async function handleExpenseComponent(
       occurredOn: state.occurredOn,
     });
     await sessions.delete(sessionId);
+    const ledger = await new LedgerService(db).requireMember(
+      state.ledgerId,
+      session.guildId,
+      session.userId,
+    );
+    if (ledger.isPublic || state.announcePublicly === true) {
+      announce(
+        interaction,
+        expenseAnnouncement({
+          actorUserId: session.userId,
+          ledgerName: state.ledgerName,
+          description: transaction.description,
+          payerUserId: state.payerUserId,
+          totalAmountMinor: transaction.totalAmountMinor,
+          occurredOn: transaction.occurredOn,
+          shares,
+          currency: state,
+        }),
+        ctx,
+      );
+    }
     return updateMessage(
       `已記錄支出「${transaction.description || "未命名支出"}」：${
         state.currencyCode

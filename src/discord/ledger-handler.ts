@@ -9,6 +9,7 @@ import {
   findFocusedOption,
   findOptionValue,
   getSubcommand,
+  optionalBoolean,
   requiredString,
   requireActorUserId,
   requireGuildId,
@@ -52,9 +53,14 @@ export async function handleLedgerCommand(
       currencyCode,
       currencyScale: Number(scaleText),
       displayName: actorDisplayName(interaction),
+      isPublic: optionalBoolean(command.options, "public"),
     });
     return ephemeral(
-      `已建立帳本「${ledger.name}」，幣別為 ${ledger.currencyCode}。`,
+      `已建立帳本「${ledger.name}」，幣別為 ${ledger.currencyCode}。${
+        ledger.isPublic
+          ? "記帳動態會公開到頻道。"
+          : "記帳動態只有操作者看得到。"
+      }`,
     );
   }
 
@@ -73,6 +79,20 @@ export async function handleLedgerCommand(
       lines.push(`…另有 ${ledgers.length - lines.length} 本帳本`);
     }
     return ephemeral(`你的帳本：\n${lines.join("\n")}`);
+  }
+
+  if (command.name === "public" && command.group === undefined) {
+    const ledger = await service.setPublic({
+      ledgerId: requiredString(command.options, "ledger"),
+      guildId,
+      actorUserId,
+      isPublic: optionalBoolean(command.options, "enabled"),
+    });
+    return ephemeral(
+      ledger.isPublic
+        ? `「${ledger.name}」已設為公開：記帳、還款、修改與刪除都會公告到頻道。`
+        : `「${ledger.name}」已設為不公開：記帳動態只有操作者看得到。`,
+    );
   }
 
   if (command.group === "member" && ["add", "remove"].includes(command.name)) {

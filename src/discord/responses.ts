@@ -27,6 +27,18 @@ export function ephemeral(content: string, components: unknown[] = []): Response
   });
 }
 
+/** Visible to everyone in the channel. Mentions stay inert. */
+export function publicMessage(content: string): Response {
+  return interactionJson({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {
+      content,
+      allowed_mentions: { parse: [] },
+      components: [],
+    },
+  });
+}
+
 export function updateMessage(
   content: string,
   components: unknown[] = [],

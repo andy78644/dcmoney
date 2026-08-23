@@ -13,6 +13,7 @@ import type {
 export async function handleRequest(
   request: Request,
   env: DiscordEnv,
+  ctx?: ExecutionContext,
 ): Promise<Response> {
   const url = new URL(request.url);
 
@@ -48,14 +49,14 @@ export async function handleRequest(
     if (interaction.type === InteractionType.PING) {
       return Response.json({ type: InteractionResponseType.PONG });
     }
-    return routeInteraction(interaction, env);
+    return routeInteraction(interaction, env, ctx);
   }
 
   return new Response("Not found", { status: 404 });
 }
 
 export default {
-  async fetch(request, env, _context): Promise<Response> {
-    return handleRequest(request, env);
+  async fetch(request, env, context): Promise<Response> {
+    return handleRequest(request, env, context);
   },
 } satisfies ExportedHandler<DiscordEnv>;

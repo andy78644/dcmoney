@@ -97,6 +97,13 @@ export function optionalString(
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+export function optionalBoolean(
+  options: readonly CommandOption[],
+  name: string,
+): boolean {
+  return options.find((option) => option.name === name)?.value === true;
+}
+
 export function optionalInteger(
   options: readonly CommandOption[],
   name: string,
