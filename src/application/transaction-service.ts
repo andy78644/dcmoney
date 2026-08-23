@@ -999,8 +999,9 @@ export class TransactionService {
     const missing = [...new Set(userIds)].filter((userId) => !members.has(userId));
     if (missing.length > 0) {
       throw new ApplicationError(
-        "FORBIDDEN",
+        "MEMBER_NOT_IN_LEDGER",
         "Every payer, receiver and participant must belong to the ledger.",
+        missing,
       );
     }
   }

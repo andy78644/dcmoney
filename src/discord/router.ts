@@ -27,6 +27,7 @@ const applicationMessages: Record<string, string> = {
   LEDGER_NAME_TAKEN: "這個伺服器已經有同名帳本。",
   MEMBER_ALREADY_EXISTS: "這位成員已經在帳本內。",
   MEMBER_NOT_FOUND: "帳本內找不到這位成員。",
+  MEMBER_NOT_IN_LEDGER: "有成員不在帳本內，請先用 /ledger member add 加入。",
   NOT_FOUND: "找不到指定的帳本或紀錄。",
   OWNER_CANNOT_BE_REMOVED: "帳本建立者不能被移除。",
   SETTLEMENT_EXCEEDS_BALANCE: "還款方向不符目前建議，或金額超過欠款。",
@@ -94,7 +95,11 @@ export async function routeInteraction(
     return ephemeral("目前不支援這個操作。");
   } catch (error) {
     if (error instanceof ApplicationError) {
-      return ephemeral(applicationMessages[error.code] ?? "操作失敗，請稍後再試。");
+      const base = applicationMessages[error.code] ?? "操作失敗，請稍後再試。";
+      const named = error.userIds
+        .map((userId) => `<@${userId}>`)
+        .join("、");
+      return ephemeral(named === "" ? base : `${base}\n未加入：${named}`);
     }
     if (error instanceof DomainError) {
       return ephemeral("帳務資料不正確，請檢查金額與分攤方式。");

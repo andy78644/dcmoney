@@ -127,7 +127,10 @@ describe("TransactionService", () => {
         interactionId: `bad-member-${sequence}`,
         shares: [{ userId: "99999", amountMinor: 100 }],
       }),
-    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    ).rejects.toMatchObject({
+      code: "MEMBER_NOT_IN_LEDGER",
+      userIds: ["99999"],
+    });
   });
 
   it("rejects a write when the ledger balance revision changes concurrently", async () => {
