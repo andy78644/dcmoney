@@ -2,6 +2,8 @@ import {
   LedgerService,
   memberLabel,
 } from "../application/ledger-service";
+import { TransactionService } from "../application/transaction-service";
+import { formatMinorAmount } from "../domain/money";
 import { currencyChoices } from "./command-definitions";
 import {
   findFocusedOption,
@@ -132,22 +134,55 @@ export async function handleLedgerAutocomplete(
     );
   }
 
-  if (!MEMBER_OPTION_NAMES.has(focused.name)) {
+  const isSettleAmount =
+    interaction.data?.name === "settle" && focused.name === "amount";
+  if (!isSettleAmount && !MEMBER_OPTION_NAMES.has(focused.name)) {
     return autocomplete([]);
   }
 
-  // 成員清單依附於已選定的帳本；還沒選帳本就沒有候選項目。
+  // 候選項目都依附於已選定的帳本；還沒選帳本就沒有東西可以提供。
   const ledgerId = findOptionValue(interaction.data?.options, "ledger");
   if (ledgerId === undefined) {
     return autocomplete([]);
   }
-  let members;
+  let ledger;
   try {
-    await service.requireMember(ledgerId, guildId, actorUserId);
-    members = await service.listMembers(ledgerId);
+    ledger = await service.requireMember(ledgerId, guildId, actorUserId);
   } catch {
     return autocomplete([]);
   }
+
+  if (isSettleAmount) {
+    const payerUserId = findOptionValue(interaction.data?.options, "payer");
+    const receiverUserId = findOptionValue(
+      interaction.data?.options,
+      "receiver",
+    );
+    if (payerUserId === undefined || receiverUserId === undefined) {
+      return autocomplete([]);
+    }
+    const suggestions = await new TransactionService(db).getSuggestions({
+      ledgerId,
+      guildId,
+      actorUserId,
+    });
+    const outstanding = suggestions.find(
+      ({ debtorUserId, creditorUserId }) =>
+        debtorUserId === payerUserId && creditorUserId === receiverUserId,
+    );
+    if (outstanding === undefined) {
+      return autocomplete([]);
+    }
+    const full = formatMinorAmount(
+      outstanding.amountMinor,
+      ledger.currencyScale,
+    );
+    return autocomplete([
+      { name: `全部結清：${ledger.currencyCode} ${full}`, value: full },
+    ]);
+  }
+
+  const members = await service.listMembers(ledgerId);
   return autocomplete(
     members
       .map((member) => ({

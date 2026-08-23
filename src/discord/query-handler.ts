@@ -736,13 +736,19 @@ export async function handleBalanceComponent(
     return updateMessage("找不到這筆還款建議。");
   }
   if (action === "balance_partial") {
+    const outstanding = formatMinorAmount(
+      suggestion.amountMinor,
+      session.state.currencyScale,
+    );
     return modal({
       customId: `balance_partial_submit:${sessionId}:${index}`,
       title: "記錄部分還款",
       fields: [
         {
           customId: "amount",
-          label: `${session.state.currencyCode} 還款金額`,
+          label: `${session.state.currencyCode} 還款金額（上限 ${outstanding}）`,
+          // 預填全額，改小即為部分還款，不必記住上一畫面的數字。
+          value: outstanding,
           maxLength: 30,
         },
       ],

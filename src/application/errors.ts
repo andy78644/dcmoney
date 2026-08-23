@@ -10,22 +10,29 @@ export type ApplicationErrorCode =
   | "MEMBER_NOT_IN_LEDGER"
   | "NOT_FOUND"
   | "OWNER_CANNOT_BE_REMOVED"
-  | "SETTLEMENT_EXCEEDS_BALANCE";
+  | "SETTLEMENT_EXCEEDS_BALANCE"
+  | "SETTLEMENT_NO_SUGGESTION";
 
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode;
   /** Discord user IDs the message should name, when the code carries them. */
   readonly userIds: readonly string[];
+  /** Extra line appended to the user-facing reply, already localised. */
+  readonly detail: string | undefined;
 
   constructor(
     code: ApplicationErrorCode,
     message: string,
-    userIds: readonly string[] = [],
+    options: {
+      userIds?: readonly string[];
+      detail?: string;
+    } = {},
   ) {
     super(message);
     this.name = "ApplicationError";
     this.code = code;
-    this.userIds = userIds;
+    this.userIds = options.userIds ?? [];
+    this.detail = options.detail;
   }
 }
 

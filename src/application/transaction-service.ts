@@ -7,7 +7,10 @@ import {
   type SettlementSuggestion,
   validateCustomShares,
 } from "../domain/accounting";
-import { assertPositiveMinorAmount } from "../domain/money";
+import {
+  assertPositiveMinorAmount,
+  formatMinorAmount,
+} from "../domain/money";
 import { ApplicationError } from "./errors";
 import { type Ledger, LedgerService } from "./ledger-service";
 import {
@@ -271,10 +274,23 @@ export class TransactionService {
         debtorUserId === input.payerUserId &&
         creditorUserId === input.receiverUserId,
     );
-    if (current === undefined || input.amountMinor > current.amountMinor) {
+    if (current === undefined) {
+      throw new ApplicationError(
+        "SETTLEMENT_NO_SUGGESTION",
+        "No outstanding debt runs from the payer to the receiver.",
+        { userIds: [input.payerUserId, input.receiverUserId] },
+      );
+    }
+    if (input.amountMinor > current.amountMinor) {
       throw new ApplicationError(
         "SETTLEMENT_EXCEEDS_BALANCE",
-        "Settlement must match a current suggestion and cannot exceed it.",
+        "Settlement cannot exceed the outstanding amount.",
+        {
+          detail: `目前欠款：${ledger.currencyCode} ${formatMinorAmount(
+            current.amountMinor,
+            ledger.currencyScale,
+          )}`,
+        },
       );
     }
 
@@ -691,10 +707,23 @@ export class TransactionService {
         debtorUserId === input.payerUserId &&
         creditorUserId === input.receiverUserId,
     );
-    if (available === undefined || input.amountMinor > available.amountMinor) {
+    if (available === undefined) {
+      throw new ApplicationError(
+        "SETTLEMENT_NO_SUGGESTION",
+        "No outstanding debt runs from the payer to the receiver.",
+        { userIds: [input.payerUserId, input.receiverUserId] },
+      );
+    }
+    if (input.amountMinor > available.amountMinor) {
       throw new ApplicationError(
         "SETTLEMENT_EXCEEDS_BALANCE",
-        "Settlement must match a current suggestion and cannot exceed it.",
+        "Settlement cannot exceed the outstanding amount.",
+        {
+          detail: `目前欠款：${ledger.currencyCode} ${formatMinorAmount(
+            available.amountMinor,
+            ledger.currencyScale,
+          )}`,
+        },
       );
     }
 
@@ -1001,7 +1030,7 @@ export class TransactionService {
       throw new ApplicationError(
         "MEMBER_NOT_IN_LEDGER",
         "Every payer, receiver and participant must belong to the ledger.",
-        missing,
+        { userIds: missing },
       );
     }
   }

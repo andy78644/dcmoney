@@ -30,7 +30,8 @@ const applicationMessages: Record<string, string> = {
   MEMBER_NOT_IN_LEDGER: "有成員不在帳本內，請先用 /ledger member add 加入。",
   NOT_FOUND: "找不到指定的帳本或紀錄。",
   OWNER_CANNOT_BE_REMOVED: "帳本建立者不能被移除。",
-  SETTLEMENT_EXCEEDS_BALANCE: "還款方向不符目前建議，或金額超過欠款。",
+  SETTLEMENT_EXCEEDS_BALANCE: "還款金額超過目前欠款。",
+  SETTLEMENT_NO_SUGGESTION: "這兩位成員之間目前沒有欠款，或還款方向相反。",
 };
 
 export async function routeInteraction(
@@ -109,10 +110,16 @@ export async function routeInteraction(
         return autocomplete([]);
       }
       const base = applicationMessages[error.code] ?? "操作失敗，請稍後再試。";
-      const named = error.userIds
-        .map((userId) => `<@${userId}>`)
-        .join("、");
-      return ephemeral(named === "" ? base : `${base}\n未加入：${named}`);
+      const lines = [base];
+      if (error.code === "MEMBER_NOT_IN_LEDGER" && error.userIds.length > 0) {
+        lines.push(
+          `未加入：${error.userIds.map((id) => `<@${id}>`).join("、")}`,
+        );
+      }
+      if (error.detail !== undefined) {
+        lines.push(error.detail);
+      }
+      return ephemeral(lines.join("\n"));
     }
     if (error instanceof DomainError) {
       console.warn("Domain error", {

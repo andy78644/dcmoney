@@ -402,3 +402,73 @@ describe("TransactionService", () => {
     ]);
   });
 });
+
+describe("settlement guard rails", () => {
+  beforeEach(() => {
+    sequence += 10;
+  });
+
+  it("separates an over-payment from a debt that does not exist", async () => {
+    const { ledger, guildId, ownerUserId, transactions } =
+      await createLedgerWithMembers();
+    // Owner fronts 300; 90002 ends up owing 150.
+    await transactions.createExpense({
+      interactionId: `guard-expense-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: ownerUserId,
+      payerUserId: ownerUserId,
+      totalAmountMinor: 300,
+      shares: [
+        { userId: ownerUserId, amountMinor: 150 },
+        { userId: "90002", amountMinor: 150 },
+      ],
+      occurredOn: "2026-08-18",
+    });
+
+    // Paying more than owed names the real ceiling.
+    await expect(
+      transactions.createSettlement({
+        interactionId: `guard-over-${sequence}`,
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+        payerUserId: "90002",
+        receiverUserId: ownerUserId,
+        amountMinor: 400,
+        occurredOn: "2026-08-18",
+      }),
+    ).rejects.toMatchObject({
+      code: "SETTLEMENT_EXCEEDS_BALANCE",
+      detail: "目前欠款：TWD 150",
+    });
+
+    // The reverse direction is a different failure entirely.
+    await expect(
+      transactions.createSettlement({
+        interactionId: `guard-reverse-${sequence}`,
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+        payerUserId: ownerUserId,
+        receiverUserId: "90002",
+        amountMinor: 10,
+        occurredOn: "2026-08-18",
+      }),
+    ).rejects.toMatchObject({ code: "SETTLEMENT_NO_SUGGESTION" });
+
+    // Settling exactly the outstanding amount still works.
+    await expect(
+      transactions.createSettlement({
+        interactionId: `guard-exact-${sequence}`,
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+        payerUserId: "90002",
+        receiverUserId: ownerUserId,
+        amountMinor: 150,
+        occurredOn: "2026-08-18",
+      }),
+    ).resolves.toMatchObject({ totalAmountMinor: 150 });
+  });
+});

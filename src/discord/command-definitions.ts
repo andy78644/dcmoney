@@ -221,6 +221,7 @@ export const commandDefinitions = [
         name: "amount",
         description: "還款金額；不填代表全部結清",
         required: false,
+        autocomplete: true,
       },
       {
         type: stringOption,

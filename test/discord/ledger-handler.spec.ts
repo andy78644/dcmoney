@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
 import { LedgerService } from "../../src/application/ledger-service";
+import { TransactionService } from "../../src/application/transaction-service";
 import { routeInteraction } from "../../src/discord/router";
 import type { DiscordInteraction } from "../../src/discord/types";
 
@@ -122,6 +123,79 @@ describe("member autocomplete", () => {
         options: [
           { name: "ledger", type: 3, value: ledger.id },
           { name: "payer", type: 3, value: "", focused: true },
+        ],
+      },
+    });
+
+    expect(choices).toEqual([]);
+  });
+});
+
+describe("settle amount autocomplete", () => {
+  it("offers the outstanding amount once payer and receiver are known", async () => {
+    const { guildId, ownerUserId, memberA, ledger } = await fixture();
+    // Owner pays 300, split evenly: memberA ends up owing 150.
+    await new TransactionService(env.DB).createExpense({
+      interactionId: `ac-exp-${++sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: ownerUserId,
+      payerUserId: ownerUserId,
+      totalAmountMinor: 300,
+      shares: [
+        { userId: ownerUserId, amountMinor: 150 },
+        { userId: memberA, amountMinor: 150 },
+      ],
+      occurredOn: "2026-08-24",
+    });
+
+    const choices = await autocompleteFor({
+      id: `ac-${++sequence}`,
+      type: 4,
+      guild_id: guildId,
+      member: { user: { id: ownerUserId } },
+      data: {
+        name: "settle",
+        options: [
+          { name: "ledger", type: 3, value: ledger.id },
+          { name: "payer", type: 3, value: memberA },
+          { name: "receiver", type: 3, value: ownerUserId },
+          { name: "amount", type: 3, value: "", focused: true },
+        ],
+      },
+    });
+
+    expect(choices).toEqual([{ name: "全部結清：TWD 150", value: "150" }]);
+  });
+
+  it("offers nothing when the debt runs the other way", async () => {
+    const { guildId, ownerUserId, memberA, ledger } = await fixture();
+    await new TransactionService(env.DB).createExpense({
+      interactionId: `ac-exp2-${++sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: ownerUserId,
+      payerUserId: ownerUserId,
+      totalAmountMinor: 300,
+      shares: [
+        { userId: ownerUserId, amountMinor: 150 },
+        { userId: memberA, amountMinor: 150 },
+      ],
+      occurredOn: "2026-08-24",
+    });
+
+    const choices = await autocompleteFor({
+      id: `ac-${++sequence}`,
+      type: 4,
+      guild_id: guildId,
+      member: { user: { id: ownerUserId } },
+      data: {
+        name: "settle",
+        options: [
+          { name: "ledger", type: 3, value: ledger.id },
+          { name: "payer", type: 3, value: ownerUserId },
+          { name: "receiver", type: 3, value: memberA },
+          { name: "amount", type: 3, value: "", focused: true },
         ],
       },
     });
