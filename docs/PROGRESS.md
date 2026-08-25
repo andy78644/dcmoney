@@ -60,7 +60,8 @@ Discord 位於美國的伺服器，Worker 因此固定在 ATL 執行。
 跨太平洋往返，每趟約 200ms。最慢的請求已用掉 Discord 3 秒上限的一半以上，
 偶爾超時就會顯示載入失敗，而 Worker 端仍記錄為成功，難以察覺。
 
-資料庫重建於 ENAM 並搬移資料後，往返降至約 20ms。
+資料庫重建於 ENAM 並搬移資料後，往返降至約 20ms。舊的 HKG 資料庫已於 2026-08-26
+刪除，刪除前留有完整匯出檔。
 
 **經驗**：D1 的位置要對齊流量來源，不是開發者的所在地。
 
@@ -93,7 +94,6 @@ script，否則 CI 會在沒有憑證的情況下嘗試套用遠端 migration �
 - 修改紀錄的表單仍以 Discord user ID 文字輸入，因為 Discord modal 只支援文字欄位。
 - 舊帳號誤建的 repo 已刪除，remote 現為 `git@github.com:andy78644/dcmoney.git`（SSH，
   因為 HTTPS token 缺 `workflow` scope 無法推送含 CI 設定的歷史）。
-- 舊的 `dcmoney`（HKG）資料庫尚未刪除，確認新資料庫穩定後可移除。
 
 ## 相關文件
 
