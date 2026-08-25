@@ -1,4 +1,8 @@
-import { LedgerService } from "../application/ledger-service";
+import {
+  LedgerService,
+  memberLabel,
+  type LedgerMember,
+} from "../application/ledger-service";
 import { ApplicationError } from "../application/errors";
 import { SessionService } from "../application/session-service";
 import {
@@ -6,6 +10,7 @@ import {
   type LedgerTransaction,
 } from "../application/transaction-service";
 import { formatMinorAmount, parsePositiveAmountToMinor } from "../domain/money";
+import { splitEqually } from "../domain/accounting";
 import { todayInTaipei } from "./date";
 import {
   announce,
@@ -14,6 +19,7 @@ import {
 } from "./announce";
 import {
   modalValue,
+  optionalModalValue,
   optionalInteger,
   optionalBoolean,
   optionalString,
@@ -185,9 +191,46 @@ function parseUserId(value: string): string {
   return match[1];
 }
 
+/**
+ * Resolves a token typed into the shares box: a Discord id, a mention, or the
+ * member's display name. Names are what the form prefills, so they are what
+ * people edit.
+ */
+function resolveMemberId(
+  token: string,
+  members: readonly LedgerMember[],
+): string {
+  const trimmed = token.trim();
+  const asId = /^(?:<@!?)?(\d{2,30})>?$/.exec(trimmed);
+  if (asId?.[1] !== undefined) {
+    return asId[1];
+  }
+  const matches = members.filter(
+    (member) =>
+      member.displayName !== null &&
+      member.displayName.toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (matches.length === 1 && matches[0] !== undefined) {
+    return matches[0].userId;
+  }
+  throw new ApplicationError(
+    "INVALID_INPUT",
+    matches.length > 1
+      ? `Ambiguous member name: ${trimmed}`
+      : `Unknown member: ${trimmed}`,
+    {
+      detail:
+        matches.length > 1
+          ? `帳本內有多位成員叫「${trimmed}」，請改填 Discord ID。`
+          : `帳本內找不到「${trimmed}」，請從分攤欄位的既有名稱修改。`,
+    },
+  );
+}
+
 function parseShares(
   value: string,
   currencyScale: number,
+  members: readonly LedgerMember[],
 ): Array<{ userId: string; amountMinor: number }> {
   const entries = value
     .split(/[\n,]+/)
@@ -197,7 +240,7 @@ function parseShares(
     throw new ApplicationError("INVALID_INPUT", "At least one share is required.");
   }
   return entries.map((entry) => {
-    const separator = entry.indexOf("=");
+    const separator = entry.lastIndexOf("=");
     if (separator < 1) {
       throw new ApplicationError(
         "INVALID_INPUT",
@@ -205,7 +248,7 @@ function parseShares(
       );
     }
     return {
-      userId: parseUserId(entry.slice(0, separator)),
+      userId: resolveMemberId(entry.slice(0, separator), members),
       amountMinor: parsePositiveAmountToMinor(
         entry.slice(separator + 1),
         currencyScale,
@@ -355,6 +398,15 @@ export async function handleHistoryComponent(
       transactionId: transactionIdFromAction,
     });
     if (action === "history_edit") {
+      const members = await new LedgerService(db).listMembers(
+        session.state.ledgerId,
+      );
+      const memberChoice = (selectedUserId: string) =>
+        members.map((member) => ({
+          label: memberLabel(member),
+          value: member.userId,
+          default: member.userId === selectedUserId,
+        }));
       if (transaction.type === "expense") {
         return modal({
           customId: `history_edit_submit:${sessionId}:${transaction.id}:${transaction.revision}`,
@@ -376,23 +428,27 @@ export async function handleHistoryComponent(
               maxLength: 10,
             },
             {
+              kind: "select",
               customId: "payer",
-              label: "付款者 Discord ID",
-              value: transaction.payerUserId,
-              maxLength: 30,
+              label: "付款者",
+              options: memberChoice(transaction.payerUserId),
             },
             {
               customId: "shares",
-              label: "分攤（每行 Discord ID=金額）",
+              label: "分攤",
+              description: "每行「成員=金額」。留空則在原參與者之間平均分攤。",
               value: transaction.shares
-                .map(
-                  ({ userId, amountMinor }) =>
-                    `${userId}=${formatMinorAmount(
-                      amountMinor,
-                      session.state.currencyScale,
-                    )}`,
-                )
+                .map(({ userId, amountMinor }) => {
+                  const member = members.find((m) => m.userId === userId);
+                  const who =
+                    member === undefined ? userId : memberLabel(member);
+                  return `${who}=${formatMinorAmount(
+                    amountMinor,
+                    session.state.currencyScale,
+                  )}`;
+                })
                 .join("\n"),
+              required: false,
               maxLength: 4000,
               style: 2,
             },
@@ -426,16 +482,16 @@ export async function handleHistoryComponent(
             maxLength: 10,
           },
           {
+            kind: "select",
             customId: "payer",
-            label: "付款者 Discord ID",
-            value: transaction.payerUserId,
-            maxLength: 30,
+            label: "付款者（欠款人）",
+            options: memberChoice(transaction.payerUserId),
           },
           {
+            kind: "select",
             customId: "receiver",
-            label: "收款者 Discord ID",
-            value: transaction.receiverUserId,
-            maxLength: 30,
+            label: "收款者",
+            options: memberChoice(transaction.receiverUserId),
           },
           {
             customId: "description",
@@ -554,6 +610,20 @@ export async function handleHistoryModal(
     session.state.currencyScale,
   );
   if (current.type === "expense") {
+    const members = await new LedgerService(db).listMembers(
+      session.state.ledgerId,
+    );
+    const sharesText = optionalModalValue(interaction, "shares").trim();
+    // Blank means "keep the same people, split the new amount evenly" — the
+    // common edit is a corrected total, and retyping every share for that is
+    // busywork.
+    const shares =
+      sharesText === ""
+        ? splitEqually(
+            amountMinor,
+            current.shares.map(({ userId }) => userId),
+          )
+        : parseShares(sharesText, session.state.currencyScale, members);
     await service.updateExpense({
       interactionId: interaction.id,
       transactionId,
@@ -563,11 +633,8 @@ export async function handleHistoryModal(
       actorUserId: session.userId,
       payerUserId: parseUserId(modalValue(interaction, "payer")),
       totalAmountMinor: amountMinor,
-      shares: parseShares(
-        modalValue(interaction, "shares"),
-        session.state.currencyScale,
-      ),
-      description: modalValue(interaction, "description"),
+      shares,
+      description: optionalModalValue(interaction, "description"),
       occurredOn: modalValue(interaction, "date"),
     });
   } else {
@@ -581,7 +648,7 @@ export async function handleHistoryModal(
       payerUserId: parseUserId(modalValue(interaction, "payer")),
       receiverUserId: parseUserId(modalValue(interaction, "receiver")),
       amountMinor,
-      description: modalValue(interaction, "description"),
+      description: optionalModalValue(interaction, "description"),
       occurredOn: modalValue(interaction, "date"),
     });
   }

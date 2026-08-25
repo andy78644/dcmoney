@@ -53,18 +53,40 @@ export function updateMessage(
   });
 }
 
+export interface ModalTextField {
+  kind?: "text";
+  customId: string;
+  label: string;
+  description?: string;
+  value?: string;
+  placeholder?: string;
+  required?: boolean;
+  maxLength?: number;
+  style?: 1 | 2;
+}
+
+export interface ModalSelectField {
+  kind: "select";
+  customId: string;
+  label: string;
+  description?: string;
+  required?: boolean;
+  options: Array<{ label: string; value: string; default?: boolean }>;
+}
+
+export type ModalField = ModalTextField | ModalSelectField;
+
+/**
+ * Builds a modal.
+ *
+ * Every field is wrapped in a Label (type 18), the component that lets a modal
+ * carry select menus rather than text inputs alone. Discord allows five
+ * top-level components.
+ */
 export function modal(input: {
   customId: string;
   title: string;
-  fields: Array<{
-    customId: string;
-    label: string;
-    value?: string;
-    placeholder?: string;
-    required?: boolean;
-    maxLength?: number;
-    style?: 1 | 2;
-  }>;
+  fields: ModalField[];
 }): Response {
   return interactionJson({
     type: InteractionResponseType.MODAL,
@@ -72,23 +94,38 @@ export function modal(input: {
       custom_id: input.customId,
       title: input.title,
       components: input.fields.map((field) => ({
-        type: 1,
-        components: [
-          {
-            type: 4,
-            custom_id: field.customId,
-            label: field.label,
-            style: field.style ?? 1,
-            required: field.required ?? true,
-            ...(field.value === undefined ? {} : { value: field.value }),
-            ...(field.placeholder === undefined
-              ? {}
-              : { placeholder: field.placeholder }),
-            ...(field.maxLength === undefined
-              ? {}
-              : { max_length: field.maxLength }),
-          },
-        ],
+        type: 18,
+        label: field.label,
+        ...(field.description === undefined
+          ? {}
+          : { description: field.description }),
+        component:
+          field.kind === "select"
+            ? {
+                type: 3,
+                custom_id: field.customId,
+                required: field.required ?? true,
+                min_values: field.required === false ? 0 : 1,
+                max_values: 1,
+                options: field.options.map(({ label, value, default: isDefault }) => ({
+                  label: label.slice(0, 100),
+                  value,
+                  ...(isDefault === true ? { default: true } : {}),
+                })),
+              }
+            : {
+                type: 4,
+                custom_id: field.customId,
+                style: field.style ?? 1,
+                required: field.required ?? true,
+                ...(field.value === undefined ? {} : { value: field.value }),
+                ...(field.placeholder === undefined
+                  ? {}
+                  : { placeholder: field.placeholder }),
+                ...(field.maxLength === undefined
+                  ? {}
+                  : { max_length: field.maxLength }),
+              },
       })),
     },
   });

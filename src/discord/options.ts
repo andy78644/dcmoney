@@ -2,6 +2,7 @@ import { ApplicationError } from "../application/errors";
 import type {
   CommandOption,
   DiscordInteraction,
+  ModalFieldValue,
 } from "./types";
 
 export function requireGuildId(interaction: DiscordInteraction): string {
@@ -112,22 +113,48 @@ export function optionalInteger(
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
+/** Walks both shapes a modal submit can use: action rows and Label wrappers. */
+function modalFields(
+  interaction: DiscordInteraction,
+): ModalFieldValue[] {
+  const fields: ModalFieldValue[] = [];
+  for (const entry of interaction.data?.components ?? []) {
+    if (entry.component !== undefined) {
+      fields.push(entry.component);
+    }
+    for (const nested of entry.components ?? []) {
+      fields.push(nested);
+    }
+  }
+  return fields;
+}
+
 export function modalValue(
   interaction: DiscordInteraction,
   customId: string,
 ): string {
-  for (const row of interaction.data?.components ?? []) {
-    const component = row.components?.find(
-      (candidate) => candidate.custom_id === customId,
-    );
-    if (component?.value !== undefined) {
-      return component.value;
-    }
-  }
-  throw new ApplicationError(
-    "INVALID_INPUT",
-    `Modal value ${customId} is missing.`,
+  const field = modalFields(interaction).find(
+    (candidate) => candidate.custom_id === customId,
   );
+  const value = field?.value ?? field?.values?.[0];
+  if (value === undefined) {
+    throw new ApplicationError(
+      "INVALID_INPUT",
+      `Modal value ${customId} is missing.`,
+    );
+  }
+  return value;
+}
+
+/** Like modalValue, but tolerates a field the user left blank. */
+export function optionalModalValue(
+  interaction: DiscordInteraction,
+  customId: string,
+): string {
+  const field = modalFields(interaction).find(
+    (candidate) => candidate.custom_id === customId,
+  );
+  return field?.value ?? field?.values?.[0] ?? "";
 }
 
 /** Finds an option's value anywhere in the (possibly nested) option tree. */

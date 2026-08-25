@@ -50,6 +50,9 @@ MVP 功能之外另有多輪介面與效能修正。
   只做一次權限檢查與一次批次寫入，已在帳本內的人會被略過而非讓整批失敗。
 - **成員清單與加入通知**。新增 `/ledger member list`；加入成員時在頻道通知並
   提及對方，這是唯一會實際 ping 人的訊息。
+- **修改表單不再需要手打 ID**。Discord 已支援在 modal 內放選單（需以 Label
+  元件包覆），付款者與收款者因此改為成員選單。分攤欄位改為預填「名稱=金額」並
+  可用名稱編輯，留空則在原參與者之間平均分攤 —— 只改總額是最常見的修改。
 
 ## 效能：資料庫位置
 
@@ -91,7 +94,6 @@ script，否則 CI 會在沒有憑證的情況下嘗試套用遠端 migration �
 
 ## 已知待辦
 
-- 修改紀錄的表單仍以 Discord user ID 文字輸入，因為 Discord modal 只支援文字欄位。
 - 舊帳號誤建的 repo 已刪除，remote 現為 `git@github.com:andy78644/dcmoney.git`（SSH，
   因為 HTTPS token 缺 `workflow` scope 無法推送含 CI 設定的歷史）。
 

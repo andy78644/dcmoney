@@ -21,6 +21,12 @@ export interface CommandOption {
   options?: CommandOption[];
 }
 
+export interface ModalFieldValue {
+  custom_id?: string;
+  value?: string;
+  values?: string[];
+}
+
 export interface InteractionData {
   name?: string;
   options?: CommandOption[];
@@ -28,7 +34,10 @@ export interface InteractionData {
   values?: string[];
   resolved?: ResolvedData;
   components?: Array<{
-    components?: Array<{ custom_id?: string; value?: string }>;
+    type?: number;
+    // Action rows nest an array; a Label (type 18) nests a single component.
+    components?: Array<ModalFieldValue>;
+    component?: ModalFieldValue;
   }>;
 }
 
