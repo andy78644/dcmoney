@@ -176,7 +176,18 @@ export class LedgerService {
     };
   }
 
-  async listForMember(guildId: string, userId: string): Promise<Ledger[]> {
+  async listForMember(
+    guildId: string,
+    userId: string,
+    options: { archived?: "exclude" | "only" | "include" } = {},
+  ): Promise<Ledger[]> {
+    const archived = options.archived ?? "exclude";
+    const clause =
+      archived === "exclude"
+        ? "AND l.archived_at IS NULL"
+        : archived === "only"
+          ? "AND l.archived_at IS NOT NULL"
+          : "";
     const result = await this.#db
       .prepare(
         `SELECT l.*
@@ -184,7 +195,7 @@ export class LedgerService {
            JOIN ledger_members m ON m.ledger_id = l.id
           WHERE l.guild_id = ?
             AND m.user_id = ?
-            AND l.archived_at IS NULL
+            ${clause}
           ORDER BY l.name COLLATE NOCASE, l.id`,
       )
       .bind(guildId, userId)
@@ -197,6 +208,7 @@ export class LedgerService {
     ledgerId: string,
     guildId: string,
     userId: string,
+    options: { includeArchived?: boolean } = {},
   ): Promise<Ledger> {
     const row = await this.#db
       .prepare(
@@ -206,7 +218,7 @@ export class LedgerService {
           WHERE l.id = ?
             AND l.guild_id = ?
             AND m.user_id = ?
-            AND l.archived_at IS NULL`,
+            ${options.includeArchived === true ? "" : "AND l.archived_at IS NULL"}`,
       )
       .bind(ledgerId, guildId, userId)
       .first<LedgerRow>();
@@ -224,8 +236,9 @@ export class LedgerService {
     ledgerId: string,
     guildId: string,
     userId: string,
+    options: { includeArchived?: boolean } = {},
   ): Promise<Ledger> {
-    const ledger = await this.requireMember(ledgerId, guildId, userId);
+    const ledger = await this.requireMember(ledgerId, guildId, userId, options);
     if (ledger.ownerUserId !== userId) {
       throw new ApplicationError(
         "FORBIDDEN",
@@ -309,6 +322,33 @@ export class LedgerService {
       throw error;
     }
     return { added: added.map(({ userId }) => userId), alreadyMembers };
+  }
+
+  /**
+   * Archives or restores a ledger. Archived ledgers disappear from listings and
+   * pickers but keep every record, so a finished trip stops cluttering the menu
+   * without destroying its history.
+   */
+  async setArchived(input: {
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    archived: boolean;
+  }): Promise<Ledger> {
+    const ledger = await this.requireOwner(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+      { includeArchived: true },
+    );
+    const archivedAt = input.archived
+      ? this.#dependencies.now().toISOString()
+      : null;
+    await this.#db
+      .prepare(`UPDATE ledgers SET archived_at = ? WHERE id = ?`)
+      .bind(archivedAt, input.ledgerId)
+      .run();
+    return { ...ledger, archivedAt };
   }
 
   async setPublic(input: {

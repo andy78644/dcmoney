@@ -1022,24 +1022,20 @@ export async function createDirectSettlement(
     guildId,
     actorUserId,
   );
-  const current = (
-    await new TransactionService(db).getSuggestions({
-      ledgerId,
-      guildId,
-      actorUserId,
-    })
-  ).find(
-    (suggestion) =>
-      suggestion.debtorUserId === payerUserId &&
-      suggestion.creditorUserId === receiverUserId,
-  );
   const amountText = optionalString(options, "amount");
+  // Omitting the amount means "clear what this person owes", which is now their
+  // whole debt rather than one simplified pair.
   const amountMinor =
     amountText === undefined
-      ? current?.amountMinor
+      ? await new TransactionService(db).getMemberDebt({
+          ledgerId,
+          guildId,
+          actorUserId,
+          memberUserId: payerUserId,
+        })
       : parsePositiveAmountToMinor(amountText, ledger.currencyScale);
-  if (amountMinor === undefined) {
-    return ephemeral("目前沒有符合這個付款方向的欠款建議。");
+  if (amountMinor <= 0) {
+    return ephemeral(`<@${payerUserId}> 目前在這個帳本沒有欠款。`);
   }
   const settlement = await new TransactionService(db).createSettlement({
     interactionId: interaction.id,

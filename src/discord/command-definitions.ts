@@ -106,12 +106,34 @@ export const commandDefinitions = [
         type: subcommand,
         name: "list",
         description: "列出我能使用的帳本",
+        options: [
+          {
+            type: booleanOption,
+            name: "archived",
+            description: "改為列出已封存的帳本",
+            required: false,
+          },
+        ],
       },
       {
         type: subcommandGroup,
         name: "member",
         description: "管理帳本成員",
         options: memberSubcommands,
+      },
+      {
+        type: subcommand,
+        name: "archive",
+        description: "封存或復原帳本（限建立者）",
+        options: [
+          ledgerOption,
+          {
+            type: booleanOption,
+            name: "enabled",
+            description: "true 封存、false 復原",
+            required: true,
+          },
+        ],
       },
       {
         type: subcommand,

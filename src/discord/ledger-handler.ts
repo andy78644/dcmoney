@@ -72,9 +72,16 @@ export async function handleLedgerCommand(
   }
 
   if (command.name === "list" && command.group === undefined) {
-    const ledgers = await service.listForMember(guildId, actorUserId);
+    const onlyArchived = optionalBoolean(command.options, "archived");
+    const ledgers = await service.listForMember(guildId, actorUserId, {
+      archived: onlyArchived ? "only" : "exclude",
+    });
     if (ledgers.length === 0) {
-      return ephemeral("你目前還沒有可使用的帳本。");
+      return ephemeral(
+        onlyArchived
+          ? "你沒有已封存的帳本。"
+          : "你目前還沒有可使用的帳本。",
+      );
     }
     const lines = ledgers.slice(0, 20).map(
       (ledger, index) =>
@@ -85,7 +92,24 @@ export async function handleLedgerCommand(
     if (ledgers.length > lines.length) {
       lines.push(`…另有 ${ledgers.length - lines.length} 本帳本`);
     }
-    return ephemeral(`你的帳本：\n${lines.join("\n")}`);
+    return ephemeral(
+      `${onlyArchived ? "已封存的帳本" : "你的帳本"}：\n${lines.join("\n")}`,
+    );
+  }
+
+  if (command.name === "archive" && command.group === undefined) {
+    const archived = optionalBoolean(command.options, "enabled");
+    const ledger = await service.setArchived({
+      ledgerId: requiredString(command.options, "ledger"),
+      guildId,
+      actorUserId,
+      archived,
+    });
+    return ephemeral(
+      archived
+        ? `已封存「${ledger.name}」。紀錄都保留著，用 \`/ledger list archived:true\` 可以找回並復原。`
+        : `已復原「${ledger.name}」，它會重新出現在帳本清單與選單中。`,
+    );
   }
 
   if (command.name === "public" && command.group === undefined) {
@@ -275,12 +299,22 @@ export async function handleLedgerAutocomplete(
   const service = new LedgerService(db);
 
   if (focused.name === "ledger") {
-    const ledgers = await service.listForMember(guildId, actorUserId);
+    // Restoring an archived ledger means being able to pick one, so the archive
+    // subcommand is the one place the picker must show them.
+    const isArchiveCommand =
+      interaction.data?.name === "ledger" &&
+      (interaction.data?.options ?? []).some(
+        (option) => option.name === "archive",
+      );
+    const ledgers = await service.listForMember(guildId, actorUserId, {
+      archived: isArchiveCommand ? "include" : "exclude",
+    });
     return autocomplete(
       ledgers
         .filter((ledger) => ledger.name.toLowerCase().includes(query))
         .map((ledger) => ({
-          name: ledger.name.slice(0, 100),
+          name: `${ledger.name}${ledger.archivedAt === null ? "" : "（已封存）"}`
+            .slice(0, 100),
           value: ledger.id,
         })),
     );
@@ -306,29 +340,21 @@ export async function handleLedgerAutocomplete(
 
   if (isSettleAmount) {
     const payerUserId = findOptionValue(interaction.data?.options, "payer");
-    const receiverUserId = findOptionValue(
-      interaction.data?.options,
-      "receiver",
-    );
-    if (payerUserId === undefined || receiverUserId === undefined) {
+    if (payerUserId === undefined) {
       return autocomplete([]);
     }
-    const suggestions = await new TransactionService(db).getSuggestions({
+    // The suggestion graph no longer constrains who may pay whom, so the useful
+    // hint is what the payer owes overall.
+    const owed = await new TransactionService(db).getMemberDebt({
       ledgerId,
       guildId,
       actorUserId,
+      memberUserId: payerUserId,
     });
-    const outstanding = suggestions.find(
-      ({ debtorUserId, creditorUserId }) =>
-        debtorUserId === payerUserId && creditorUserId === receiverUserId,
-    );
-    if (outstanding === undefined) {
+    if (owed <= 0) {
       return autocomplete([]);
     }
-    const full = formatMinorAmount(
-      outstanding.amountMinor,
-      ledger.currencyScale,
-    );
+    const full = formatMinorAmount(owed, ledger.currencyScale);
     return autocomplete([
       { name: `全部結清：${ledger.currencyCode} ${full}`, value: full },
     ]);

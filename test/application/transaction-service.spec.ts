@@ -408,10 +408,70 @@ describe("settlement guard rails", () => {
     sequence += 10;
   });
 
-  it("separates an over-payment from a debt that does not exist", async () => {
+  it("allows paying whoever you actually owe, not just the simplified pair", async () => {
     const { ledger, guildId, ownerUserId, transactions } =
       await createLedgerWithMembers();
-    // Owner fronts 300; 90002 ends up owing 150.
+    // 90002 covers 90003, then 90003 covers the owner. Simplification collapses
+    // the chain to "owner owes 90002", but the owner borrowed from 90003.
+    await transactions.createExpense({
+      interactionId: `chain-a-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: ownerUserId,
+      payerUserId: "90002",
+      totalAmountMinor: 100,
+      shares: [{ userId: "90003", amountMinor: 100 }],
+      occurredOn: "2026-08-10",
+    });
+    await transactions.createExpense({
+      interactionId: `chain-b-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: ownerUserId,
+      payerUserId: "90003",
+      totalAmountMinor: 100,
+      shares: [{ userId: ownerUserId, amountMinor: 100 }],
+      occurredOn: "2026-08-11",
+    });
+    await expect(
+      transactions.getSuggestions({
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+      }),
+    ).resolves.toEqual([
+      { debtorUserId: ownerUserId, creditorUserId: "90002", amountMinor: 100 },
+    ]);
+
+    // Paying 90003 does not match that suggestion, but it is what happened.
+    await expect(
+      transactions.createSettlement({
+        interactionId: `chain-pay-${sequence}`,
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+        payerUserId: ownerUserId,
+        receiverUserId: "90003",
+        amountMinor: 100,
+        occurredOn: "2026-08-18",
+      }),
+    ).resolves.toMatchObject({ totalAmountMinor: 100 });
+
+    // The owner is square; 90003 now carries the debt onward to 90002.
+    await expect(
+      transactions.getSuggestions({
+        ledgerId: ledger.id,
+        guildId,
+        actorUserId: ownerUserId,
+      }),
+    ).resolves.toEqual([
+      { debtorUserId: "90003", creditorUserId: "90002", amountMinor: 100 },
+    ]);
+  });
+
+  it("still refuses a payer who owes nothing, or an amount beyond their debt", async () => {
+    const { ledger, guildId, ownerUserId, transactions } =
+      await createLedgerWithMembers();
     await transactions.createExpense({
       interactionId: `guard-expense-${sequence}`,
       ledgerId: ledger.id,
@@ -426,7 +486,7 @@ describe("settlement guard rails", () => {
       occurredOn: "2026-08-18",
     });
 
-    // Paying more than owed names the real ceiling.
+    // Beyond the payer's total debt: almost always a typo.
     await expect(
       transactions.createSettlement({
         interactionId: `guard-over-${sequence}`,
@@ -440,13 +500,13 @@ describe("settlement guard rails", () => {
       }),
     ).rejects.toMatchObject({
       code: "SETTLEMENT_EXCEEDS_BALANCE",
-      detail: "目前欠款：TWD 150",
+      detail: "<@90002> 目前總共欠 TWD 150。",
     });
 
-    // The reverse direction is a different failure entirely.
+    // The owner is a creditor here, so there is nothing for them to settle.
     await expect(
       transactions.createSettlement({
-        interactionId: `guard-reverse-${sequence}`,
+        interactionId: `guard-creditor-${sequence}`,
         ledgerId: ledger.id,
         guildId,
         actorUserId: ownerUserId,
@@ -455,9 +515,9 @@ describe("settlement guard rails", () => {
         amountMinor: 10,
         occurredOn: "2026-08-18",
       }),
-    ).rejects.toMatchObject({ code: "SETTLEMENT_NO_SUGGESTION" });
+    ).rejects.toMatchObject({ code: "SETTLEMENT_NOT_A_DEBTOR" });
 
-    // Settling exactly the outstanding amount still works.
+    // Exactly the outstanding amount still works.
     await expect(
       transactions.createSettlement({
         interactionId: `guard-exact-${sequence}`,

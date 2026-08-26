@@ -168,7 +168,7 @@ describe("settle amount autocomplete", () => {
     expect(choices).toEqual([{ name: "全部結清：TWD 150", value: "150" }]);
   });
 
-  it("offers nothing when the debt runs the other way", async () => {
+  it("offers nothing when the payer owes nothing", async () => {
     const { guildId, ownerUserId, memberA, ledger } = await fixture();
     await new TransactionService(env.DB).createExpense({
       interactionId: `ac-exp2-${++sequence}`,

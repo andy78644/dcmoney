@@ -11,7 +11,7 @@ export type ApplicationErrorCode =
   | "NOT_FOUND"
   | "OWNER_CANNOT_BE_REMOVED"
   | "SETTLEMENT_EXCEEDS_BALANCE"
-  | "SETTLEMENT_NO_SUGGESTION";
+  | "SETTLEMENT_NOT_A_DEBTOR";
 
 export class ApplicationError extends Error {
   readonly code: ApplicationErrorCode;

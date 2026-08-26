@@ -268,31 +268,12 @@ export class TransactionService {
       input.receiverUserId,
     ]);
 
-    const suggestions = await this.#loadSuggestions(input.ledgerId);
-    const current = suggestions.find(
-      ({ debtorUserId, creditorUserId }) =>
-        debtorUserId === input.payerUserId &&
-        creditorUserId === input.receiverUserId,
+    this.#assertSettlementWithinDebt(
+      await this.#loadBalances(input.ledgerId),
+      ledger,
+      input.payerUserId,
+      input.amountMinor,
     );
-    if (current === undefined) {
-      throw new ApplicationError(
-        "SETTLEMENT_NO_SUGGESTION",
-        "No outstanding debt runs from the payer to the receiver.",
-        { userIds: [input.payerUserId, input.receiverUserId] },
-      );
-    }
-    if (input.amountMinor > current.amountMinor) {
-      throw new ApplicationError(
-        "SETTLEMENT_EXCEEDS_BALANCE",
-        "Settlement cannot exceed the outstanding amount.",
-        {
-          detail: `目前欠款：${ledger.currencyCode} ${formatMinorAmount(
-            current.amountMinor,
-            ledger.currencyScale,
-          )}`,
-        },
-      );
-    }
 
     const postings = buildSettlementPostings(
       input.payerUserId,
@@ -484,6 +465,22 @@ export class TransactionService {
       input.actorUserId,
     );
     return this.#requireTransaction(input.transactionId, input.ledgerId);
+  }
+
+  /** What this member owes across the ledger; 0 when they owe nothing. */
+  async getMemberDebt(
+    input: TransactionAccess & { memberUserId: string },
+  ): Promise<number> {
+    await this.#ledgers.requireMember(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    const balances = await this.#loadBalances(input.ledgerId);
+    const balance =
+      balances.find(({ userId }) => userId === input.memberUserId)
+        ?.amountMinor ?? 0;
+    return balance < 0 ? -balance : 0;
   }
 
   async getSuggestions(input: TransactionAccess & {
@@ -697,35 +694,12 @@ export class TransactionService {
       input.payerUserId,
       input.receiverUserId,
     ]);
-    const suggestions = await this.#loadSuggestions(
-      input.ledgerId,
-      undefined,
-      input.transactionId,
+    this.#assertSettlementWithinDebt(
+      await this.#loadBalances(input.ledgerId, undefined, input.transactionId),
+      ledger,
+      input.payerUserId,
+      input.amountMinor,
     );
-    const available = suggestions.find(
-      ({ debtorUserId, creditorUserId }) =>
-        debtorUserId === input.payerUserId &&
-        creditorUserId === input.receiverUserId,
-    );
-    if (available === undefined) {
-      throw new ApplicationError(
-        "SETTLEMENT_NO_SUGGESTION",
-        "No outstanding debt runs from the payer to the receiver.",
-        { userIds: [input.payerUserId, input.receiverUserId] },
-      );
-    }
-    if (input.amountMinor > available.amountMinor) {
-      throw new ApplicationError(
-        "SETTLEMENT_EXCEEDS_BALANCE",
-        "Settlement cannot exceed the outstanding amount.",
-        {
-          detail: `目前欠款：${ledger.currencyCode} ${formatMinorAmount(
-            available.amountMinor,
-            ledger.currencyScale,
-          )}`,
-        },
-      );
-    }
 
     const postings = buildSettlementPostings(
       input.payerUserId,
@@ -990,6 +964,17 @@ export class TransactionService {
     asOf?: string,
     excludedTransactionId?: string,
   ): Promise<SettlementSuggestion[]> {
+    return simplifyDebts(
+      await this.#loadBalances(ledgerId, asOf, excludedTransactionId),
+    );
+  }
+
+  /** Raw per-member net position. Negative means the member owes. */
+  async #loadBalances(
+    ledgerId: string,
+    asOf?: string,
+    excludedTransactionId?: string,
+  ): Promise<Balance[]> {
     const clauses = ["t.ledger_id = ?", "t.deleted_at IS NULL"];
     const bindings: string[] = [ledgerId];
     if (asOf !== undefined) {
@@ -1011,13 +996,46 @@ export class TransactionService {
     const result = await statement
       .bind(...bindings)
       .all<{ user_id: string; amount_minor: number }>();
-    const balances: Balance[] = result.results.map(
-      ({ user_id, amount_minor }) => ({
-        userId: user_id,
-        amountMinor: amount_minor,
-      }),
+    return result.results.map(({ user_id, amount_minor }) => ({
+      userId: user_id,
+      amountMinor: amount_minor,
+    }));
+  }
+
+  /**
+   * A settlement is just a transfer between two members, so it need not follow
+   * the simplified suggestion: people hand money to whoever they actually see.
+   * The only guard kept is that the payer cannot pay out more than they owe
+   * across the ledger, which catches a mistyped amount without dictating who
+   * pays whom.
+   */
+  #assertSettlementWithinDebt(
+    balances: readonly Balance[],
+    ledger: Ledger,
+    payerUserId: string,
+    amountMinor: number,
+  ): void {
+    const owed = -(
+      balances.find(({ userId }) => userId === payerUserId)?.amountMinor ?? 0
     );
-    return simplifyDebts(balances);
+    if (owed <= 0) {
+      throw new ApplicationError(
+        "SETTLEMENT_NOT_A_DEBTOR",
+        "The payer does not owe anything in this ledger.",
+        { userIds: [payerUserId] },
+      );
+    }
+    if (amountMinor > owed) {
+      throw new ApplicationError(
+        "SETTLEMENT_EXCEEDS_BALANCE",
+        "Settlement cannot exceed what the payer owes.",
+        {
+          detail: `<@${payerUserId}> 目前總共欠 ${
+            ledger.currencyCode
+          } ${formatMinorAmount(owed, ledger.currencyScale)}。`,
+        },
+      );
+    }
   }
 
   async #requireTransactionMembers(
