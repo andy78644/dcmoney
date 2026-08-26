@@ -165,7 +165,7 @@ describe("settle amount autocomplete", () => {
       },
     });
 
-    expect(choices).toEqual([{ name: "全部結清：TWD 150", value: "150" }]);
+    expect(choices).toEqual([{ name: "依建議結清：TWD 150", value: "150" }]);
   });
 
   it("offers nothing when the payer owes nothing", async () => {

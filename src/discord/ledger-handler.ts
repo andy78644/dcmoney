@@ -340,23 +340,31 @@ export async function handleLedgerAutocomplete(
 
   if (isSettleAmount) {
     const payerUserId = findOptionValue(interaction.data?.options, "payer");
-    if (payerUserId === undefined) {
+    const receiverUserId = findOptionValue(
+      interaction.data?.options,
+      "receiver",
+    );
+    if (payerUserId === undefined || receiverUserId === undefined) {
       return autocomplete([]);
     }
-    // The suggestion graph no longer constrains who may pay whom, so the useful
-    // hint is what the payer owes overall.
-    const owed = await new TransactionService(db).getMemberDebt({
-      ledgerId,
-      guildId,
-      actorUserId,
-      memberUserId: payerUserId,
-    });
-    if (owed <= 0) {
+    // Suggest what this pair owes. The payer's overall debt would be the wrong
+    // number to hand one receiver.
+    const suggested = (
+      await new TransactionService(db).getSuggestions({
+        ledgerId,
+        guildId,
+        actorUserId,
+      })
+    ).find(
+      ({ debtorUserId, creditorUserId }) =>
+        debtorUserId === payerUserId && creditorUserId === receiverUserId,
+    );
+    if (suggested === undefined) {
       return autocomplete([]);
     }
-    const full = formatMinorAmount(owed, ledger.currencyScale);
+    const full = formatMinorAmount(suggested.amountMinor, ledger.currencyScale);
     return autocomplete([
-      { name: `全部結清：${ledger.currencyCode} ${full}`, value: full },
+      { name: `依建議結清：${ledger.currencyCode} ${full}`, value: full },
     ]);
   }
 

@@ -1023,19 +1023,30 @@ export async function createDirectSettlement(
     actorUserId,
   );
   const amountText = optionalString(options, "amount");
-  // Omitting the amount means "clear what this person owes", which is now their
-  // whole debt rather than one simplified pair.
-  const amountMinor =
-    amountText === undefined
-      ? await new TransactionService(db).getMemberDebt({
-          ledgerId,
-          guildId,
-          actorUserId,
-          memberUserId: payerUserId,
-        })
-      : parsePositiveAmountToMinor(amountText, ledger.currencyScale);
-  if (amountMinor <= 0) {
-    return ephemeral(`<@${payerUserId}> 目前在這個帳本沒有欠款。`);
+  let amountMinor: number;
+  if (amountText !== undefined) {
+    amountMinor = parsePositiveAmountToMinor(amountText, ledger.currencyScale);
+  } else {
+    // Omitting the amount means "settle this suggestion", so it resolves to
+    // what the simplified graph says this pair owes — never the payer's whole
+    // debt, which would be wrong the moment they owe more than one person.
+    const suggested = (
+      await new TransactionService(db).getSuggestions({
+        ledgerId,
+        guildId,
+        actorUserId,
+      })
+    ).find(
+      ({ debtorUserId, creditorUserId }) =>
+        debtorUserId === payerUserId && creditorUserId === receiverUserId,
+    );
+    if (suggested === undefined) {
+      return ephemeral(
+        `目前的建議還款中沒有 <@${payerUserId}> → <@${receiverUserId}> 這一筆，` +
+          "所以無法自動判斷金額。請填入實際還款金額，或用 `/balances` 依建議結清。",
+      );
+    }
+    amountMinor = suggested.amountMinor;
   }
   const settlement = await new TransactionService(db).createSettlement({
     interactionId: interaction.id,
