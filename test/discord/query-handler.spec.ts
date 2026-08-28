@@ -588,3 +588,68 @@ describe("public balances", () => {
     expect(publicReply.data?.allowed_mentions).toEqual({ parse: [] });
   });
 });
+
+describe("balance picker labels", () => {
+  it("names the two people instead of printing their ids", async () => {
+    sequence += 1;
+    const guildId = `8810${sequence}`;
+    const owner = `8820${sequence}`;
+    const friend = `8830${sequence}`;
+    const ledgers = new LedgerService(env.DB);
+    const ledger = await ledgers.create({
+      interactionId: `bl-l-${sequence}`,
+      guildId,
+      actorUserId: owner,
+      name: `Picker ${sequence}`,
+      currencyCode: "TWD",
+      currencyScale: 0,
+      displayName: "阿肥",
+    });
+    await ledgers.addMember({
+      interactionId: `bl-m-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: owner,
+      memberUserId: friend,
+      displayName: "小明",
+    });
+    await new TransactionService(env.DB).createExpense({
+      interactionId: `bl-e-${sequence}`,
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: owner,
+      payerUserId: owner,
+      totalAmountMinor: 400,
+      shares: [{ userId: friend, amountMinor: 400 }],
+      occurredOn: "2026-08-29",
+    });
+
+    const shown = await payload(
+      await routeInteraction(
+        {
+          id: `bl-cmd-${++sequence}`,
+          type: 2,
+          guild_id: guildId,
+          member: { user: { id: owner } },
+          data: {
+            name: "balances",
+            options: [{ name: "ledger", type: 3, value: ledger.id }],
+          },
+        } as never,
+        env,
+      ),
+    );
+
+    const option = (
+      shown.data?.components?.[0]?.components?.[0] as unknown as {
+        options?: Array<{ label: string; description: string }>;
+      }
+    )?.options?.[0];
+
+    expect(option?.label).toBe("小明 → 阿肥");
+    expect(option?.description).toBe("TWD 400");
+    // The ids must not leak into text Discord will not render as a mention.
+    expect(option?.label).not.toContain(friend);
+    expect(option?.description).not.toContain(owner);
+  });
+});

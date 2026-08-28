@@ -53,6 +53,8 @@ interface BalanceSessionState {
   ledgerName: string;
   currencyCode: string;
   currencyScale: number;
+  /** Display names captured when the query ran, keyed by Discord user id. */
+  memberNames: Record<string, string>;
   suggestions: Array<{
     debtorUserId: string;
     creditorUserId: string;
@@ -696,6 +698,10 @@ function balanceContent(state: BalanceSessionState): string {
   ].join("\n");
 }
 
+function nameOf(state: BalanceSessionState, userId: string): string {
+  return state.memberNames[userId] ?? userId;
+}
+
 function balanceComponents(sessionId: string, state: BalanceSessionState): unknown[] {
   if (state.suggestions.length === 0) {
     return [];
@@ -708,14 +714,16 @@ function balanceComponents(sessionId: string, state: BalanceSessionState): unkno
       min_values: 1,
       max_values: 1,
       options: state.suggestions.slice(0, 25).map((suggestion, index) => ({
-        label: `${index + 1}. ${formatMinorAmount(
+        // A select option renders as plain text, so a <@id> mention would show
+        // the raw number here. Use the names captured with the query.
+        label: `${nameOf(state, suggestion.debtorUserId)} → ${nameOf(
+          state,
+          suggestion.creditorUserId,
+        )}`.slice(0, 100),
+        description: `${state.currencyCode} ${formatMinorAmount(
           suggestion.amountMinor,
           state.currencyScale,
-        )} ${state.currencyCode}`,
-        description: `${suggestion.debtorUserId} → ${suggestion.creditorUserId}`.slice(
-          0,
-          100,
-        ),
+        )}`.slice(0, 100),
         value: String(index),
       })),
     }),
@@ -745,11 +753,18 @@ export async function startBalances(
     ...(asOf === undefined ? {} : { asOf }),
     ...(memberUserId === undefined ? {} : { memberUserId }),
   });
+  const memberNames = Object.fromEntries(
+    (await new LedgerService(db).listMembers(ledgerId)).map((member) => [
+      member.userId,
+      memberLabel(member),
+    ]),
+  );
   const state: BalanceSessionState = {
     ledgerId,
     ledgerName: ledger.name,
     currencyCode: ledger.currencyCode,
     currencyScale: ledger.currencyScale,
+    memberNames,
     suggestions,
   };
   const content =
