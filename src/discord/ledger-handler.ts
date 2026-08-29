@@ -12,6 +12,7 @@ import {
   findOptionValue,
   getSubcommand,
   optionalBoolean,
+  optionalInteger,
   optionalString,
   requiredString,
   requireActorUserId,
@@ -83,18 +84,33 @@ export async function handleLedgerCommand(
           : "你目前還沒有可使用的帳本。",
       );
     }
-    const lines = ledgers.slice(0, 20).map(
-      (ledger, index) =>
-        `${index + 1}. ${ledger.name} · ${ledger.currencyCode}${
-          ledger.ownerUserId === actorUserId ? " · 建立者" : ""
-        }`,
-    );
-    if (ledgers.length > lines.length) {
-      lines.push(`…另有 ${ledgers.length - lines.length} 本帳本`);
+    const perPage = 20;
+    const pages = Math.max(1, Math.ceil(ledgers.length / perPage));
+    const page = Math.min(optionalInteger(command.options, "page") ?? 1, pages);
+    const lines = ledgers
+      .slice((page - 1) * perPage, page * perPage)
+      .map(
+        (ledger, index) =>
+          `${(page - 1) * perPage + index + 1}. ${ledger.name} · ${
+            ledger.currencyCode
+          }${ledger.ownerUserId === actorUserId ? " · 建立者" : ""}`,
+      );
+    if (pages > 1) {
+      lines.push(`（第 ${page} / ${pages} 頁，共 ${ledgers.length} 本）`);
     }
     return ephemeral(
       `${onlyArchived ? "已封存的帳本" : "你的帳本"}：\n${lines.join("\n")}`,
     );
+  }
+
+  if (command.name === "rename" && command.group === undefined) {
+    const ledger = await service.rename({
+      ledgerId: requiredString(command.options, "ledger"),
+      guildId,
+      actorUserId,
+      name: requiredString(command.options, "name"),
+    });
+    return ephemeral(`帳本已更名為「${ledger.name}」。`);
   }
 
   if (command.name === "transfer" && command.group === undefined) {

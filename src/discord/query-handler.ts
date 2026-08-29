@@ -104,13 +104,38 @@ function historyContent(
   );
 }
 
+const PAGE_SIZE = 10;
+
 function historyComponents(
   sessionId: string,
   state: HistorySessionState,
   transactions: LedgerTransaction[],
 ): unknown[] {
+  // A full page probably has more behind it; a short page is certainly the end.
+  const maybeMore = transactions.length === PAGE_SIZE;
+  const pager =
+    state.page > 1 || maybeMore
+      ? [
+          actionRow(
+            {
+              type: 2,
+              style: 2,
+              custom_id: `history_page:${sessionId}:${state.page - 1}`,
+              label: "上一頁",
+              disabled: state.page <= 1,
+            },
+            {
+              type: 2,
+              style: 2,
+              custom_id: `history_page:${sessionId}:${state.page + 1}`,
+              label: "下一頁",
+              disabled: !maybeMore,
+            },
+          ),
+        ]
+      : [];
   if (transactions.length === 0) {
-    return [];
+    return pager;
   }
   return [
     actionRow({
@@ -124,6 +149,7 @@ function historyComponents(
         value: transaction.id,
       })),
     }),
+    ...pager,
   ];
 }
 
@@ -295,8 +321,8 @@ async function listFromHistoryState(
     ...(state.startDate === undefined ? {} : { startDate: state.startDate }),
     ...(state.endDate === undefined ? {} : { endDate: state.endDate }),
     ...(state.type === undefined ? {} : { type: state.type }),
-    limit: 10,
-    offset: (state.page - 1) * 10,
+    limit: PAGE_SIZE,
+    offset: (state.page - 1) * PAGE_SIZE,
   });
 }
 
@@ -394,6 +420,43 @@ export async function handleHistoryComponent(
       historyDetailComponents(sessionId, transaction),
     );
   }
+  if (action === "history_page") {
+    const requested = Number(transactionIdFromAction);
+    if (!Number.isInteger(requested) || requested < 1) {
+      return updateMessage("頁碼無效，請重新查詢。");
+    }
+    session.state.page = requested;
+    const transactions = await listFromHistoryState(
+      session.state,
+      session.guildId,
+      session.userId,
+      db,
+    );
+    if (transactions.length === 0 && requested > 1) {
+      // Walked past the end: stay put rather than showing a blank page.
+      session.state.page = requested - 1;
+      return updateMessage(
+        `已經是最後一頁了（第 ${session.state.page} 頁）。`,
+        historyComponents(
+          sessionId,
+          session.state,
+          await listFromHistoryState(
+            session.state,
+            session.guildId,
+            session.userId,
+            db,
+          ),
+        ),
+      );
+    }
+    session.state.transactionIds = transactions.map(({ id }) => id);
+    await new SessionService(db).update(sessionId, session.state);
+    return updateMessage(
+      historyContent(session.state, transactions),
+      historyComponents(sessionId, session.state, transactions),
+    );
+  }
+
   if (action === "history_back") {
     const transactions = await listFromHistoryState(
       session.state,
@@ -770,6 +833,7 @@ function balanceContent(state: BalanceSessionState): string {
   if (state.suggestions.length === 0) {
     return `「${state.ledgerName}」目前沒有未結清欠款。`;
   }
+  const truncated = state.suggestions.length > MAX_BALANCE_OPTIONS;
   return [
     `「${state.ledgerName}」簡化後欠款：`,
     ...state.suggestions.map(
@@ -781,8 +845,16 @@ function balanceContent(state: BalanceSessionState): string {
           state.currencyScale,
         )}`,
     ),
+    ...(truncated
+      ? [
+          `（下方選單只放得下前 ${MAX_BALANCE_OPTIONS} 筆，其餘請用 /settle 記錄）`,
+        ]
+      : []),
   ].join("\n");
 }
+
+// Discord select menus hold at most 25 options.
+const MAX_BALANCE_OPTIONS = 25;
 
 function nameOf(state: BalanceSessionState, userId: string): string {
   return state.memberNames[userId] ?? userId;
@@ -799,7 +871,9 @@ function balanceComponents(sessionId: string, state: BalanceSessionState): unkno
       placeholder: "選擇一筆欠款進行還款",
       min_values: 1,
       max_values: 1,
-      options: state.suggestions.slice(0, 25).map((suggestion, index) => ({
+      options: state.suggestions
+        .slice(0, MAX_BALANCE_OPTIONS)
+        .map((suggestion, index) => ({
         // A select option renders as plain text, so a <@id> mention would show
         // the raw number here. Use the names captured with the query.
         label: `${nameOf(state, suggestion.debtorUserId)} → ${nameOf(
@@ -814,6 +888,67 @@ function balanceComponents(sessionId: string, state: BalanceSessionState): unkno
       })),
     }),
   ];
+}
+
+export async function startSummary(
+  interaction: DiscordInteraction,
+  db: D1Database,
+): Promise<Response> {
+  const guildId = requireGuildId(interaction);
+  const actorUserId = requireActorUserId(interaction);
+  const options = interaction.data?.options ?? [];
+  const ledgerId = requiredString(options, "ledger");
+  const ledgers = new LedgerService(db);
+  const ledger = await ledgers.requireMember(ledgerId, guildId, actorUserId);
+  const startDate = optionalString(options, "start_date");
+  const endDate = optionalString(options, "end_date");
+
+  const summary = await new TransactionService(db).getSummary({
+    ledgerId,
+    guildId,
+    actorUserId,
+    ...(startDate === undefined ? {} : { startDate }),
+    ...(endDate === undefined ? {} : { endDate }),
+  });
+  if (summary.expenseCount === 0) {
+    return ephemeral(`「${ledger.name}」在這個範圍內沒有支出。`);
+  }
+
+  const money = (amountMinor: number) =>
+    `${ledger.currencyCode} ${formatMinorAmount(
+      amountMinor,
+      ledger.currencyScale,
+    )}`;
+  const range =
+    startDate === undefined && endDate === undefined
+      ? ""
+      : `（${startDate ?? "最早"} ~ ${endDate ?? "今天"}）`;
+
+  const lines = [
+    `「${ledger.name}」統計${range}`,
+    `總支出：${money(summary.totalSpentMinor)}，共 ${summary.expenseCount} 筆`,
+    "",
+    "每人：",
+    ...summary.perMember.map(({ userId, paidMinor, shareMinor }) => {
+      const net = paidMinor - shareMinor;
+      const sign = net > 0 ? "應收" : net < 0 ? "應付" : "打平";
+      const netText = net === 0 ? "打平" : `${sign} ${money(Math.abs(net))}`;
+      return `• <@${userId}>：付出 ${money(paidMinor)}｜分攤 ${money(
+        shareMinor,
+      )}｜${netText}`;
+    }),
+  ];
+  if (summary.perCategory.length > 0) {
+    lines.push("", "分類：");
+    for (const { category, amountMinor } of summary.perCategory.slice(0, 15)) {
+      const share = Math.round((amountMinor / summary.totalSpentMinor) * 100);
+      lines.push(`• ${category ?? "未分類"}：${money(amountMinor)}（${share}%）`);
+    }
+  }
+  const content = lines.join("\n");
+  return optionalBoolean(options, "public")
+    ? publicMessage(content)
+    : ephemeral(content);
 }
 
 export async function startBalances(

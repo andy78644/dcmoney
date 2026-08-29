@@ -18,6 +18,7 @@ import {
   handleHistoryModal,
   startBalances,
   startExpenses,
+  startSummary,
 } from "./query-handler";
 import { autocomplete, ephemeral } from "./responses";
 import type { DiscordInteraction } from "./types";
@@ -53,6 +54,9 @@ export async function routeInteraction(
     }
     if (interaction.type === 2 && interaction.data?.name === "expenses") {
       return await startExpenses(interaction, env.DB);
+    }
+    if (interaction.type === 2 && interaction.data?.name === "summary") {
+      return await startSummary(interaction, env.DB);
     }
     if (interaction.type === 2 && interaction.data?.name === "balances") {
       return await startBalances(interaction, env.DB);

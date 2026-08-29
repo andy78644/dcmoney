@@ -478,6 +478,110 @@ export class TransactionService {
     return this.#requireTransaction(input.transactionId, input.ledgerId);
   }
 
+  /**
+   * Totals for a period: what the ledger spent, what each member paid out and
+   * was allocated, and the split by category. `/balances` answers "who should
+   * pay whom"; this answers "where did the money go".
+   */
+  async getSummary(
+    input: TransactionAccess & { startDate?: string; endDate?: string },
+  ): Promise<{
+    totalSpentMinor: number;
+    expenseCount: number;
+    perMember: Array<{ userId: string; paidMinor: number; shareMinor: number }>;
+    perCategory: Array<{ category: string | null; amountMinor: number }>;
+  }> {
+    await this.#ledgers.requireMember(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    const clauses = [
+      "t.ledger_id = ?",
+      "t.deleted_at IS NULL",
+      "t.type = 'expense'",
+    ];
+    const bindings: string[] = [input.ledgerId];
+    if (input.startDate !== undefined) {
+      assertCalendarDate(input.startDate);
+      clauses.push("t.occurred_on >= ?");
+      bindings.push(input.startDate);
+    }
+    if (input.endDate !== undefined) {
+      assertCalendarDate(input.endDate);
+      clauses.push("t.occurred_on <= ?");
+      bindings.push(input.endDate);
+    }
+    const where = clauses.join(" AND ");
+
+    const [totals, paid, shares, categories] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `SELECT COUNT(*) AS n, COALESCE(SUM(t.total_amount_minor), 0) AS total
+             FROM transactions t WHERE ${where}`,
+        )
+        .bind(...bindings),
+      this.#db
+        .prepare(
+          `SELECT d.payer_user_id AS user_id,
+                  SUM(t.total_amount_minor) AS amount
+             FROM transactions t
+             JOIN expense_details d ON d.transaction_id = t.id
+            WHERE ${where}
+            GROUP BY d.payer_user_id`,
+        )
+        .bind(...bindings),
+      this.#db
+        .prepare(
+          `SELECT s.user_id, SUM(s.amount_minor) AS amount
+             FROM transactions t
+             JOIN expense_shares s ON s.transaction_id = t.id
+            WHERE ${where}
+            GROUP BY s.user_id`,
+        )
+        .bind(...bindings),
+      this.#db
+        .prepare(
+          `SELECT t.category, SUM(t.total_amount_minor) AS amount
+             FROM transactions t
+            WHERE ${where}
+            GROUP BY t.category
+            ORDER BY amount DESC`,
+        )
+        .bind(...bindings),
+    ]);
+
+    const rowsOf = <T>(result: D1Result | undefined): T[] =>
+      (result?.results ?? []) as T[];
+    const totalRow = rowsOf<{ n: number; total: number }>(totals)[0];
+    const paidBy = new Map(
+      rowsOf<{ user_id: string; amount: number }>(paid).map(
+        ({ user_id, amount }) => [user_id, amount],
+      ),
+    );
+    const shareBy = new Map(
+      rowsOf<{ user_id: string; amount: number }>(shares).map(
+        ({ user_id, amount }) => [user_id, amount],
+      ),
+    );
+    const everyone = new Set([...paidBy.keys(), ...shareBy.keys()]);
+
+    return {
+      totalSpentMinor: totalRow?.total ?? 0,
+      expenseCount: totalRow?.n ?? 0,
+      perMember: [...everyone]
+        .map((userId) => ({
+          userId,
+          paidMinor: paidBy.get(userId) ?? 0,
+          shareMinor: shareBy.get(userId) ?? 0,
+        }))
+        .sort((a, b) => b.paidMinor - a.paidMinor || a.userId.localeCompare(b.userId)),
+      perCategory: rowsOf<{ category: string | null; amount: number }>(
+        categories,
+      ).map(({ category, amount }) => ({ category, amountMinor: amount })),
+    };
+  }
+
   /** Categories this ledger has actually used, most recent first. */
   async listCategories(input: TransactionAccess): Promise<string[]> {
     await this.#ledgers.requireMember(

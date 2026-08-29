@@ -8,7 +8,13 @@ import { routeInteraction } from "../../src/discord/router";
 let sequence = 0;
 
 interface Reply {
-  data?: { content?: string; choices?: Array<{ name: string; value: string }> };
+  data?: {
+    content?: string;
+    choices?: Array<{ name: string; value: string }>;
+    components?: Array<{
+      components?: Array<{ custom_id?: string; disabled?: boolean; label?: string }>;
+    }>;
+  };
 }
 const json = async (r: Response) => (await r.json()) as Reply;
 
@@ -139,5 +145,34 @@ describe("expense categories", () => {
     await expect(
       expense(transactions, ledger.id, guildId, owner, friend, "x".repeat(31), 100, "2026-08-29"),
     ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+});
+
+describe("history pagination", () => {
+  it("moves between pages with buttons and stops at the end", async () => {
+    const { guildId, owner, friend, ledger, transactions } = await fixture();
+    // 12 records = two pages of 10.
+    for (let i = 0; i < 12; i += 1) {
+      await expense(transactions, ledger.id, guildId, owner, friend, undefined, 10 + i, "2026-08-29");
+    }
+
+    const first = await json(
+      await act(`pg-1-${++sequence}`, 2, guildId, owner, {
+        name: "expenses",
+        options: [{ name: "ledger", type: 3, value: ledger.id }],
+      }),
+    );
+
+    expect(first.data?.content).toContain("第 1 頁");
+    const pager = first.data?.components?.[1]?.components ?? [];
+    const prev = pager.find((c) => c.label === "上一頁");
+    const next = pager.find((c) => c.label === "下一頁");
+    expect(prev?.disabled).toBe(true);
+    expect(next?.disabled).toBe(false);
+
+    const second = await json(
+      await act(`pg-2-${++sequence}`, 3, guildId, owner, { custom_id: next?.custom_id }),
+    );
+    expect(second.data?.content).toContain("第 2 頁");
   });
 });

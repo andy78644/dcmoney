@@ -450,6 +450,42 @@ export class LedgerService {
     return ledger;
   }
 
+  async rename(input: {
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    name: string;
+  }): Promise<Ledger> {
+    const ledger = await this.requireManager(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+      { includeArchived: true },
+    );
+    const name = input.name.trim();
+    if (name.length === 0 || name.length > 80) {
+      throw new ApplicationError(
+        "INVALID_INPUT",
+        "Ledger name must contain between 1 and 80 characters.",
+      );
+    }
+    try {
+      await this.#db
+        .prepare(`UPDATE ledgers SET name = ? WHERE id = ?`)
+        .bind(name, input.ledgerId)
+        .run();
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new ApplicationError(
+          "LEDGER_NAME_TAKEN",
+          "An active ledger with this name already exists in the server.",
+        );
+      }
+      throw error;
+    }
+    return { ...ledger, name };
+  }
+
   async setPublic(input: {
     ledgerId: string;
     guildId: string;

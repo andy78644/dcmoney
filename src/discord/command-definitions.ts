@@ -113,6 +113,13 @@ export const commandDefinitions = [
             description: "改為列出已封存的帳本",
             required: false,
           },
+          {
+            type: integerOption,
+            name: "page",
+            description: "頁碼（每頁 20 本）",
+            required: false,
+            min_value: 1,
+          },
         ],
       },
       {
@@ -120,6 +127,22 @@ export const commandDefinitions = [
         name: "member",
         description: "管理帳本成員",
         options: memberSubcommands,
+      },
+      {
+        type: subcommand,
+        name: "rename",
+        description: "更改帳本名稱（限管理者）",
+        options: [
+          ledgerOption,
+          {
+            type: stringOption,
+            name: "name",
+            description: "新的帳本名稱",
+            required: true,
+            min_length: 1,
+            max_length: 80,
+          },
+        ],
       },
       {
         type: subcommand,
@@ -298,6 +321,34 @@ export const commandDefinitions = [
         type: booleanOption,
         name: "public",
         description: "公開顯示給頻道所有人看（預設只有自己看得到）",
+        required: false,
+      },
+    ],
+  },
+  {
+    name: "summary",
+    description: "查看總支出、每人付了多少與分類統計",
+    type: 1,
+    contexts: [0],
+    integration_types: [0],
+    options: [
+      ledgerOption,
+      {
+        type: stringOption,
+        name: "start_date",
+        description: "開始日期（YYYY-MM-DD）",
+        required: false,
+      },
+      {
+        type: stringOption,
+        name: "end_date",
+        description: "結束日期（YYYY-MM-DD）",
+        required: false,
+      },
+      {
+        type: booleanOption,
+        name: "public",
+        description: "公開顯示給頻道所有人看",
         required: false,
       },
     ],

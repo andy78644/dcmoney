@@ -49,6 +49,13 @@ export class SessionService {
     const expiresAt = new Date(
       now.getTime() + (input.ttlMinutes ?? 15) * 60_000,
     ).toISOString();
+    // Expired rows are only ever rejected on read, so without this they would
+    // accumulate for the lifetime of the database. Cleaning up here keeps it
+    // bounded without needing a scheduled job.
+    await this.#db
+      .prepare(`DELETE FROM interaction_sessions WHERE expires_at <= ?`)
+      .bind(createdAt)
+      .run();
     await this.#db
       .prepare(
         `INSERT INTO interaction_sessions
