@@ -49,6 +49,7 @@ export interface CreateLedgerInput {
 export interface LedgerMember {
   userId: string;
   displayName: string | null;
+  isManager: boolean;
 }
 
 /** Discord 選單／autocomplete 的標籤上限是 100 字元。 */
@@ -135,8 +136,9 @@ export class LedgerService {
         this.#db
           .prepare(
             `INSERT INTO ledger_members
-              (ledger_id, user_id, added_by, created_at, display_name)
-             VALUES (?, ?, ?, ?, ?)`,
+              (ledger_id, user_id, added_by, created_at, display_name,
+               is_manager)
+             VALUES (?, ?, ?, ?, ?, 1)`,
           )
           .bind(
             id,
@@ -232,17 +234,32 @@ export class LedgerService {
     return mapLedger(row);
   }
 
-  async requireOwner(
+  /**
+   * Admin actions need a manager, not specifically the creator: a ledger whose
+   * creator left the Discord server would otherwise have nobody able to manage
+   * it, with no way back.
+   */
+  async requireManager(
     ledgerId: string,
     guildId: string,
     userId: string,
     options: { includeArchived?: boolean } = {},
   ): Promise<Ledger> {
     const ledger = await this.requireMember(ledgerId, guildId, userId, options);
-    if (ledger.ownerUserId !== userId) {
+    if (ledger.ownerUserId === userId) {
+      return ledger;
+    }
+    const row = await this.#db
+      .prepare(
+        `SELECT is_manager FROM ledger_members
+          WHERE ledger_id = ? AND user_id = ?`,
+      )
+      .bind(ledgerId, userId)
+      .first<{ is_manager: number }>();
+    if (row?.is_manager !== 1) {
       throw new ApplicationError(
         "FORBIDDEN",
-        "Only the ledger owner can manage members.",
+        "Only a ledger manager can perform this action.",
       );
     }
     return ledger;
@@ -262,7 +279,7 @@ export class LedgerService {
     actorUserId: string;
     members: ReadonlyArray<{ userId: string; displayName?: string | undefined }>;
   }): Promise<{ added: string[]; alreadyMembers: string[] }> {
-    await this.requireOwner(input.ledgerId, input.guildId, input.actorUserId);
+    await this.requireManager(input.ledgerId, input.guildId, input.actorUserId);
     for (const { userId } of input.members) {
       assertDiscordId(userId, "Member user ID");
     }
@@ -335,7 +352,7 @@ export class LedgerService {
     actorUserId: string;
     archived: boolean;
   }): Promise<Ledger> {
-    const ledger = await this.requireOwner(
+    const ledger = await this.requireManager(
       input.ledgerId,
       input.guildId,
       input.actorUserId,
@@ -351,13 +368,95 @@ export class LedgerService {
     return { ...ledger, archivedAt };
   }
 
+  /** Hands the creator role to another member, who becomes a manager too. */
+  async transferOwnership(input: {
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    newOwnerUserId: string;
+  }): Promise<Ledger> {
+    const ledger = await this.requireManager(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+      { includeArchived: true },
+    );
+    const members = await this.listMemberIds(input.ledgerId);
+    if (!members.includes(input.newOwnerUserId)) {
+      throw new ApplicationError(
+        "MEMBER_NOT_FOUND",
+        "The new owner must already be a ledger member.",
+        { userIds: [input.newOwnerUserId] },
+      );
+    }
+    await this.#db.batch([
+      this.#db
+        .prepare(`UPDATE ledgers SET owner_user_id = ? WHERE id = ?`)
+        .bind(input.newOwnerUserId, input.ledgerId),
+      this.#db
+        .prepare(
+          `UPDATE ledger_members SET is_manager = 1
+            WHERE ledger_id = ? AND user_id = ?`,
+        )
+        .bind(input.ledgerId, input.newOwnerUserId),
+    ]);
+    return { ...ledger, ownerUserId: input.newOwnerUserId };
+  }
+
+  async setManager(input: {
+    ledgerId: string;
+    guildId: string;
+    actorUserId: string;
+    memberUserId: string;
+    isManager: boolean;
+  }): Promise<Ledger> {
+    const ledger = await this.requireManager(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+      { includeArchived: true },
+    );
+    if (!input.isManager && ledger.ownerUserId === input.memberUserId) {
+      throw new ApplicationError(
+        "OWNER_CANNOT_BE_REMOVED",
+        "The ledger creator is always a manager.",
+      );
+    }
+    const members = await this.listMembers(input.ledgerId);
+    if (!members.some(({ userId }) => userId === input.memberUserId)) {
+      throw new ApplicationError(
+        "MEMBER_NOT_FOUND",
+        "This user is not a ledger member.",
+        { userIds: [input.memberUserId] },
+      );
+    }
+    // Never leave a ledger with nobody able to administer it.
+    if (
+      !input.isManager &&
+      members.filter(({ isManager }) => isManager).length <= 1
+    ) {
+      throw new ApplicationError(
+        "LAST_MANAGER",
+        "A ledger must keep at least one manager.",
+      );
+    }
+    await this.#db
+      .prepare(
+        `UPDATE ledger_members SET is_manager = ?
+          WHERE ledger_id = ? AND user_id = ?`,
+      )
+      .bind(input.isManager ? 1 : 0, input.ledgerId, input.memberUserId)
+      .run();
+    return ledger;
+  }
+
   async setPublic(input: {
     ledgerId: string;
     guildId: string;
     actorUserId: string;
     isPublic: boolean;
   }): Promise<Ledger> {
-    const ledger = await this.requireOwner(
+    const ledger = await this.requireManager(
       input.ledgerId,
       input.guildId,
       input.actorUserId,
@@ -372,16 +471,21 @@ export class LedgerService {
   async listMembers(ledgerId: string): Promise<LedgerMember[]> {
     const result = await this.#db
       .prepare(
-        `SELECT user_id, display_name
+        `SELECT user_id, display_name, is_manager
            FROM ledger_members
           WHERE ledger_id = ?
           ORDER BY created_at, user_id`,
       )
       .bind(ledgerId)
-      .all<{ user_id: string; display_name: string | null }>();
-    return result.results.map(({ user_id, display_name }) => ({
+      .all<{
+        user_id: string;
+        display_name: string | null;
+        is_manager: number;
+      }>();
+    return result.results.map(({ user_id, display_name, is_manager }) => ({
       userId: user_id,
       displayName: display_name,
+      isManager: is_manager === 1,
     }));
   }
 
@@ -406,7 +510,7 @@ export class LedgerService {
     memberUserId: string;
     displayName?: string | undefined;
   }): Promise<void> {
-    await this.requireOwner(input.ledgerId, input.guildId, input.actorUserId);
+    await this.requireManager(input.ledgerId, input.guildId, input.actorUserId);
     assertDiscordId(input.memberUserId, "Member user ID");
     const createdAt = this.#dependencies.now().toISOString();
 
@@ -457,7 +561,7 @@ export class LedgerService {
     actorUserId: string;
     memberUserId: string;
   }): Promise<void> {
-    const ledger = await this.requireOwner(
+    const ledger = await this.requireManager(
       input.ledgerId,
       input.guildId,
       input.actorUserId,

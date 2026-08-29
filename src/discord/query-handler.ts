@@ -41,6 +41,7 @@ interface HistorySessionState {
   currencyCode: string;
   currencyScale: number;
   memberUserId?: string;
+  category?: string;
   startDate?: string;
   endDate?: string;
   type?: "expense" | "settlement";
@@ -87,12 +88,16 @@ function historyContent(
   }
   const lines = transactions.map((transaction, index) => {
     const kind = transaction.type === "expense" ? "支出" : "還款";
+    const category =
+      transaction.type === "expense" && transaction.category !== null
+        ? `｜#${transaction.category}`
+        : "";
     return `${index + 1}. ${transaction.occurredOn}｜${kind}｜${
       transaction.description || "未填說明"
     }｜${state.currencyCode} ${formatMinorAmount(
       transaction.totalAmountMinor,
       state.currencyScale,
-    )}`;
+    )}${category}`;
   });
   return [`「${state.ledgerName}」紀錄（第 ${state.page} 頁）：`, ...lines].join(
     "\n",
@@ -139,6 +144,7 @@ function transactionDetail(
   if (transaction.type === "expense") {
     return [
       ...base,
+      `分類：${transaction.category ?? "未分類"}`,
       `付款者：<@${transaction.payerUserId}>`,
       "分攤：",
       ...transaction.shares.map(
@@ -169,6 +175,19 @@ function historyDetailComponents(
         custom_id: `history_edit:${sessionId}:${transaction.id}`,
         label: "修改",
       },
+      // Category lives on its own button rather than in the edit form: that
+      // form already carries five fields, and Discord does not document how
+      // many a modal may hold.
+      ...(transaction.type === "expense"
+        ? [
+            {
+              type: 2,
+              style: 2,
+              custom_id: `history_category:${sessionId}:${transaction.id}:${transaction.revision}`,
+              label: "分類",
+            },
+          ]
+        : []),
       {
         type: 2,
         style: 4,
@@ -272,6 +291,7 @@ async function listFromHistoryState(
     ...(state.memberUserId === undefined
       ? {}
       : { memberUserId: state.memberUserId }),
+    ...(state.category === undefined ? {} : { category: state.category }),
     ...(state.startDate === undefined ? {} : { startDate: state.startDate }),
     ...(state.endDate === undefined ? {} : { endDate: state.endDate }),
     ...(state.type === undefined ? {} : { type: state.type }),
@@ -294,6 +314,7 @@ export async function startExpenses(
     actorUserId,
   );
   const kind = optionalString(options, "kind");
+  const category = optionalString(options, "category");
   const memberUserId = optionalString(options, "member");
   const startDate = optionalString(options, "start_date");
   const endDate = optionalString(options, "end_date");
@@ -305,6 +326,7 @@ export async function startExpenses(
     page: optionalInteger(options, "page") ?? 1,
     transactionIds: [],
     ...(memberUserId === undefined ? {} : { memberUserId }),
+    ...(category === undefined ? {} : { category }),
     ...(startDate === undefined ? {} : { startDate }),
     ...(endDate === undefined ? {} : { endDate }),
     ...(kind === "expense" || kind === "settlement" ? { type: kind } : {}),
@@ -386,6 +408,32 @@ export async function handleHistoryComponent(
       historyComponents(sessionId, session.state, transactions),
     );
   }
+  if (action === "history_category" && transactionIdFromAction !== undefined) {
+    const transaction = await new TransactionService(db).get({
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      transactionId: transactionIdFromAction,
+    });
+    if (transaction.type !== "expense") {
+      return updateMessage("只有支出可以設定分類。");
+    }
+    return modal({
+      customId: `history_category_submit:${sessionId}:${transactionIdFromAction}:${transaction.revision}`,
+      title: "設定分類",
+      fields: [
+        {
+          customId: "category",
+          label: "分類",
+          description: "留空即清除分類。",
+          value: transaction.category ?? "",
+          required: false,
+          maxLength: 30,
+        },
+      ],
+    });
+  }
+
   if (
     (action === "history_edit" || action === "history_delete") &&
     transactionIdFromAction !== undefined
@@ -586,7 +634,7 @@ export async function handleHistoryModal(
     interaction.data?.custom_id ?? ""
   ).split(":");
   if (
-    action !== "history_edit_submit" ||
+    (action !== "history_edit_submit" && action !== "history_category_submit") ||
     sessionId === undefined ||
     transactionId === undefined
   ) {
@@ -607,6 +655,41 @@ export async function handleHistoryModal(
     actorUserId: session.userId,
     transactionId,
   });
+
+  if (action === "history_category_submit") {
+    if (current.type !== "expense") {
+      return updateMessage("只有支出可以設定分類。");
+    }
+    // Reuse updateExpense so the change goes through the same revision lock and
+    // audit trail as any other edit.
+    const category = optionalModalValue(interaction, "category").trim();
+    await service.updateExpense({
+      interactionId: interaction.id,
+      transactionId,
+      expectedRevision,
+      ledgerId: session.state.ledgerId,
+      guildId: session.guildId,
+      actorUserId: session.userId,
+      payerUserId: current.payerUserId,
+      totalAmountMinor: current.totalAmountMinor,
+      shares: current.shares,
+      description: current.description,
+      occurredOn: current.occurredOn,
+      ...(category === "" ? {} : { category }),
+    });
+    return updateMessage(
+      category === "" ? "已清除分類。" : `分類已設為「${category}」。`,
+      [
+        actionRow({
+          type: 2,
+          style: 2,
+          custom_id: `history_back:${sessionId}`,
+          label: "返回列表",
+        }),
+      ],
+    );
+  }
+
   const amountMinor = parsePositiveAmountToMinor(
     modalValue(interaction, "amount"),
     session.state.currencyScale,
@@ -638,6 +721,9 @@ export async function handleHistoryModal(
       shares,
       description: optionalModalValue(interaction, "description"),
       occurredOn: modalValue(interaction, "date"),
+      // The edit form has no category field, so carry the existing one over
+      // rather than silently clearing it.
+      ...(current.category === null ? {} : { category: current.category }),
     });
   } else {
     await service.updateSettlement({

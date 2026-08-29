@@ -37,6 +37,7 @@ interface ExpenseSessionState {
   totalAmountMinor: number;
   splitMethod: "equal" | "custom";
   description: string;
+  category?: string;
   occurredOn: string;
   announcePublicly?: boolean;
   participantUserIds?: string[];
@@ -190,6 +191,10 @@ export async function startExpense(
     splitMethod: split,
     description: optionalString(command.options, "description") ?? "",
     occurredOn: optionalString(command.options, "date") ?? todayInTaipei(),
+    ...(() => {
+      const category = optionalString(command.options, "category");
+      return category === undefined ? {} : { category };
+    })(),
     ...(optionalBoolean(command.options, "public")
       ? { announcePublicly: true }
       : {}),
@@ -295,6 +300,7 @@ export async function handleExpenseComponent(
       totalAmountMinor: state.totalAmountMinor,
       shares,
       description: state.description,
+      ...(state.category === undefined ? {} : { category: state.category }),
       occurredOn: state.occurredOn,
     });
     await sessions.delete(sessionId);

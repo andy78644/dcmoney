@@ -123,6 +123,27 @@ export const commandDefinitions = [
       },
       {
         type: subcommand,
+        name: "transfer",
+        description: "把建立者身分轉移給另一位成員（限管理者）",
+        options: [ledgerOption, memberOption("user", "新的建立者", true)],
+      },
+      {
+        type: subcommand,
+        name: "manager",
+        description: "設定或取消成員的管理者身分（限管理者）",
+        options: [
+          ledgerOption,
+          memberOption("user", "帳本成員", true),
+          {
+            type: booleanOption,
+            name: "enabled",
+            description: "true 設為管理者、false 取消",
+            required: true,
+          },
+        ],
+      },
+      {
+        type: subcommand,
         name: "archive",
         description: "封存或復原帳本（限建立者）",
         options: [
@@ -195,6 +216,13 @@ export const commandDefinitions = [
             required: false,
           },
           {
+            type: stringOption,
+            name: "category",
+            description: "分類，例如「餐飲」「交通」；會記住這個帳本用過的分類",
+            required: false,
+            autocomplete: true,
+          },
+          {
             type: booleanOption,
             name: "public",
             description: "這筆公開到頻道（帳本已設公開時一律公開）",
@@ -224,6 +252,13 @@ export const commandDefinitions = [
         name: "end_date",
         description: "結束日期（YYYY-MM-DD）",
         required: false,
+      },
+      {
+        type: stringOption,
+        name: "category",
+        description: "只顯示這個分類的紀錄",
+        required: false,
+        autocomplete: true,
       },
       {
         type: stringOption,

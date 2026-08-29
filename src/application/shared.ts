@@ -10,6 +10,23 @@ export const defaultServiceDependencies: ServiceDependencies = {
   now: () => new Date(),
 };
 
+/** Categories are free text; blank collapses to null so filters stay simple. */
+export function normalizeCategory(
+  category: string | undefined,
+): string | null {
+  const trimmed = category?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.length > 30) {
+    throw new ApplicationError(
+      "INVALID_INPUT",
+      "Category must be 30 characters or fewer.",
+    );
+  }
+  return trimmed;
+}
+
 export function normalizeDescription(description: string | undefined): string {
   const normalized = description?.trim() ?? "";
   if (normalized.length > 200) {

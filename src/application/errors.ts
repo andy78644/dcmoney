@@ -4,6 +4,7 @@ export type ApplicationErrorCode =
   | "FORBIDDEN"
   | "INVALID_DATE"
   | "INVALID_INPUT"
+  | "LAST_MANAGER"
   | "LEDGER_NAME_TAKEN"
   | "MEMBER_ALREADY_EXISTS"
   | "MEMBER_NOT_FOUND"

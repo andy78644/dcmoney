@@ -28,6 +28,7 @@ const applicationMessages: Record<string, string> = {
   FORBIDDEN: "你沒有權限使用這個帳本或執行這項操作。",
   INVALID_DATE: "日期格式或日期內容不正確。",
   INVALID_INPUT: "輸入內容不正確，請檢查後再試。",
+  LAST_MANAGER: "帳本至少要保留一位管理者。",
   LEDGER_NAME_TAKEN: "這個伺服器已經有同名帳本。",
   MEMBER_ALREADY_EXISTS: "這位成員已經在帳本內。",
   MEMBER_NOT_FOUND: "帳本內找不到這位成員。",

@@ -16,6 +16,7 @@ import { type Ledger, LedgerService } from "./ledger-service";
 import {
   assertCalendarDate,
   defaultServiceDependencies,
+  normalizeCategory,
   normalizeDescription,
   type ServiceDependencies,
 } from "./shared";
@@ -34,6 +35,7 @@ interface TransactionRow {
   revision: number;
   deleted_at: string | null;
   deleted_by: string | null;
+  category: string | null;
 }
 
 interface ExpenseDetailRow {
@@ -67,6 +69,7 @@ export interface ExpenseTransaction extends TransactionBase {
   type: "expense";
   payerUserId: string;
   shares: Share[];
+  category: string | null;
 }
 
 export interface SettlementTransaction extends TransactionBase {
@@ -89,6 +92,7 @@ export interface CreateExpenseInput extends TransactionAccess {
   totalAmountMinor: number;
   shares: Share[];
   description?: string;
+  category?: string | undefined;
   occurredOn: string;
 }
 
@@ -103,6 +107,7 @@ export interface CreateSettlementInput extends TransactionAccess {
 
 export interface ListTransactionsInput extends TransactionAccess {
   memberUserId?: string;
+  category?: string;
   startDate?: string;
   endDate?: string;
   type?: "expense" | "settlement";
@@ -174,6 +179,7 @@ export class TransactionService {
       revision: 1,
       payerUserId: input.payerUserId,
       shares,
+      category: normalizeCategory(input.category),
     };
 
     const statements: D1PreparedStatement[] = [
@@ -184,8 +190,8 @@ export class TransactionService {
           `INSERT INTO transactions
             (id, ledger_id, type, description, total_amount_minor, occurred_on,
              created_by, created_at, updated_by, updated_at, revision,
-             last_operation_id)
-           SELECT ?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, 1, ?
+             last_operation_id, category)
+           SELECT ?, ?, 'expense', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
             WHERE EXISTS (
               SELECT 1 FROM ledgers
                WHERE id = ? AND last_balance_operation_id = ?
@@ -202,6 +208,7 @@ export class TransactionService {
           input.actorUserId,
           createdAt,
           input.interactionId,
+          normalizeCategory(input.category),
           input.ledgerId,
           input.interactionId,
         ),
@@ -407,6 +414,10 @@ export class TransactionService {
 
     const clauses = ["t.ledger_id = ?", "t.deleted_at IS NULL"];
     const bindings: (string | number)[] = [input.ledgerId];
+    if (input.category !== undefined) {
+      clauses.push("t.category = ?");
+      bindings.push(input.category);
+    }
     if (input.startDate !== undefined) {
       clauses.push("t.occurred_on >= ?");
       bindings.push(input.startDate);
@@ -465,6 +476,29 @@ export class TransactionService {
       input.actorUserId,
     );
     return this.#requireTransaction(input.transactionId, input.ledgerId);
+  }
+
+  /** Categories this ledger has actually used, most recent first. */
+  async listCategories(input: TransactionAccess): Promise<string[]> {
+    await this.#ledgers.requireMember(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    const result = await this.#db
+      .prepare(
+        `SELECT category, MAX(occurred_on) AS latest
+           FROM transactions
+          WHERE ledger_id = ?
+            AND deleted_at IS NULL
+            AND category IS NOT NULL
+          GROUP BY category
+          ORDER BY latest DESC, category
+          LIMIT 25`,
+      )
+      .bind(input.ledgerId)
+      .all<{ category: string }>();
+    return result.results.map(({ category }) => category);
   }
 
   /** What this member owes across the ledger; 0 when they owe nothing. */
@@ -546,6 +580,7 @@ export class TransactionService {
       revision: input.expectedRevision + 1,
       payerUserId: input.payerUserId,
       shares,
+      category: normalizeCategory(input.category),
     };
     const operationGuard = `EXISTS (
       SELECT 1 FROM transactions
@@ -559,7 +594,7 @@ export class TransactionService {
           `UPDATE transactions
               SET description = ?, total_amount_minor = ?, occurred_on = ?,
                   updated_by = ?, updated_at = ?, revision = revision + 1,
-                  last_operation_id = ?
+                  last_operation_id = ?, category = ?
             WHERE id = ? AND ledger_id = ? AND revision = ?
               AND deleted_at IS NULL
               AND EXISTS (
@@ -574,6 +609,7 @@ export class TransactionService {
           input.actorUserId,
           updatedAt,
           input.interactionId,
+          normalizeCategory(input.category),
           input.transactionId,
           input.ledgerId,
           input.expectedRevision,
@@ -934,6 +970,7 @@ export class TransactionService {
         ...base,
         type: "expense",
         payerUserId: detail.payer_user_id,
+        category: row.category,
         shares: shares.results.map(({ user_id, amount_minor }) => ({
           userId: user_id,
           amountMinor: amount_minor,

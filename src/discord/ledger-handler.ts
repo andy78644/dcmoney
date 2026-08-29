@@ -97,6 +97,36 @@ export async function handleLedgerCommand(
     );
   }
 
+  if (command.name === "transfer" && command.group === undefined) {
+    const newOwnerUserId = requiredString(command.options, "user");
+    const ledger = await service.transferOwnership({
+      ledgerId: requiredString(command.options, "ledger"),
+      guildId,
+      actorUserId,
+      newOwnerUserId,
+    });
+    return ephemeral(
+      `「${ledger.name}」的建立者已轉移給 <@${newOwnerUserId}>，對方同時成為管理者。`,
+    );
+  }
+
+  if (command.name === "manager" && command.group === undefined) {
+    const memberUserId = requiredString(command.options, "user");
+    const enabled = optionalBoolean(command.options, "enabled");
+    const ledger = await service.setManager({
+      ledgerId: requiredString(command.options, "ledger"),
+      guildId,
+      actorUserId,
+      memberUserId,
+      isManager: enabled,
+    });
+    return ephemeral(
+      enabled
+        ? `<@${memberUserId}> 現在是「${ledger.name}」的管理者，可以管理成員與設定。`
+        : `已取消 <@${memberUserId}> 在「${ledger.name}」的管理者身分。`,
+    );
+  }
+
   if (command.name === "archive" && command.group === undefined) {
     const archived = optionalBoolean(command.options, "enabled");
     const ledger = await service.setArchived({
@@ -132,9 +162,14 @@ export async function handleLedgerCommand(
     const members = await service.listMembers(ledgerId);
     const lines = members.map((member, index) => {
       const isOwner = member.userId === ledger.ownerUserId;
+      const role = isOwner
+        ? " · 建立者"
+        : member.isManager
+          ? " · 管理者"
+          : "";
       return `${index + 1}. <@${member.userId}>${
         member.displayName === null ? "" : `（${member.displayName}）`
-      }${isOwner ? " · 建立者" : ""}`;
+      }${role}`;
     });
     return ephemeral(
       [
@@ -152,7 +187,7 @@ export async function handleLedgerCommand(
       const single = optionalString(command.options, "user");
       if (single === undefined) {
         // 沒指定人就開多選；成員清單交給 Discord 的 user select。
-        const ledger = await service.requireOwner(
+        const ledger = await service.requireManager(
           ledgerId,
           guildId,
           actorUserId,
@@ -181,7 +216,7 @@ export async function handleLedgerCommand(
           ],
         );
       }
-      const ledger = await service.requireOwner(ledgerId, guildId, actorUserId);
+      const ledger = await service.requireManager(ledgerId, guildId, actorUserId);
       await service.addMember({
         interactionId: interaction.id,
         ledgerId,
@@ -322,7 +357,12 @@ export async function handleLedgerAutocomplete(
 
   const isSettleAmount =
     interaction.data?.name === "settle" && focused.name === "amount";
-  if (!isSettleAmount && !MEMBER_OPTION_NAMES.has(focused.name)) {
+  const isCategory = focused.name === "category";
+  if (
+    !isSettleAmount &&
+    !isCategory &&
+    !MEMBER_OPTION_NAMES.has(focused.name)
+  ) {
     return autocomplete([]);
   }
 
@@ -336,6 +376,21 @@ export async function handleLedgerAutocomplete(
     ledger = await service.requireMember(ledgerId, guildId, actorUserId);
   } catch {
     return autocomplete([]);
+  }
+
+  if (isCategory) {
+    // Categories are free text; the suggestions are simply what this ledger has
+    // used before, so they grow with use instead of needing to be configured.
+    const used = await new TransactionService(db).listCategories({
+      ledgerId,
+      guildId,
+      actorUserId,
+    });
+    return autocomplete(
+      used
+        .filter((category) => category.toLowerCase().includes(query))
+        .map((category) => ({ name: category, value: category })),
+    );
   }
 
   if (isSettleAmount) {
