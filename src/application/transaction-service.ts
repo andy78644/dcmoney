@@ -605,22 +605,6 @@ export class TransactionService {
     return result.results.map(({ category }) => category);
   }
 
-  /** What this member owes across the ledger; 0 when they owe nothing. */
-  async getMemberDebt(
-    input: TransactionAccess & { memberUserId: string },
-  ): Promise<number> {
-    await this.#ledgers.requireMember(
-      input.ledgerId,
-      input.guildId,
-      input.actorUserId,
-    );
-    const balances = await this.#loadBalances(input.ledgerId);
-    const balance =
-      balances.find(({ userId }) => userId === input.memberUserId)
-        ?.amountMinor ?? 0;
-    return balance < 0 ? -balance : 0;
-  }
-
   async getSuggestions(input: TransactionAccess & {
     asOf?: string;
     memberUserId?: string;

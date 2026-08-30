@@ -90,14 +90,16 @@ describe("/settle without an amount", () => {
   it("settles what this pair owes, not the payer's whole debt", async () => {
     const { guildId, debtor, alice, ledger, transactions } = await twoCreditors();
     // Total debt is 300, but only 100 of it is owed to Alice.
-    await expect(
-      transactions.getMemberDebt({
-        ledgerId: ledger.id,
-        guildId,
-        actorUserId: debtor,
-        memberUserId: debtor,
-      }),
-    ).resolves.toBe(300);
+    const owedTo = await transactions.getSuggestions({
+      ledgerId: ledger.id,
+      guildId,
+      actorUserId: debtor,
+    });
+    expect(
+      owedTo
+        .filter(({ debtorUserId }) => debtorUserId === debtor)
+        .reduce((sum, { amountMinor }) => sum + amountMinor, 0),
+    ).toBe(300);
 
     const done = await json(
       await settle(guildId, debtor, ledger.id, debtor, alice),

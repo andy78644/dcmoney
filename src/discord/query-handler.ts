@@ -433,20 +433,22 @@ export async function handleHistoryComponent(
       db,
     );
     if (transactions.length === 0 && requested > 1) {
-      // Walked past the end: stay put rather than showing a blank page.
+      // Walked past the end. The stored session still holds the previous page
+      // and its ids, so roll back in memory and re-render from that — querying
+      // again would just repeat the page we already showed.
       session.state.page = requested - 1;
+      const previous = await listFromHistoryState(
+        session.state,
+        session.guildId,
+        session.userId,
+        db,
+      );
       return updateMessage(
-        `已經是最後一頁了（第 ${session.state.page} 頁）。`,
-        historyComponents(
-          sessionId,
-          session.state,
-          await listFromHistoryState(
-            session.state,
-            session.guildId,
-            session.userId,
-            db,
-          ),
-        ),
+        [
+          `已經是最後一頁了（第 ${session.state.page} 頁）。`,
+          historyContent(session.state, previous),
+        ].join("\n\n"),
+        historyComponents(sessionId, session.state, previous),
       );
     }
     session.state.transactionIds = transactions.map(({ id }) => id);

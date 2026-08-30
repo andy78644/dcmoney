@@ -118,7 +118,7 @@ describe("ledger managers", () => {
         memberUserId: owner,
         isManager: false,
       }),
-    ).rejects.toMatchObject({ code: "OWNER_CANNOT_BE_REMOVED" });
+    ).rejects.toMatchObject({ code: "OWNER_ALWAYS_MANAGER" });
 
     // Hand over, then the new sole manager cannot demote themselves either.
     await ledgers.transferOwnership({
@@ -142,6 +142,6 @@ describe("ledger managers", () => {
         memberUserId: helper,
         isManager: false,
       }),
-    ).rejects.toMatchObject({ code: "OWNER_CANNOT_BE_REMOVED" });
+    ).rejects.toMatchObject({ code: "OWNER_ALWAYS_MANAGER" });
   });
 });

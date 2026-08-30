@@ -403,6 +403,10 @@ export class LedgerService {
     return { ...ledger, ownerUserId: input.newOwnerUserId };
   }
 
+  /**
+   * The creator cannot be demoted, which is what keeps a ledger from ever
+   * losing its last manager — no separate count check is needed.
+   */
   async setManager(input: {
     ledgerId: string;
     guildId: string;
@@ -418,7 +422,7 @@ export class LedgerService {
     );
     if (!input.isManager && ledger.ownerUserId === input.memberUserId) {
       throw new ApplicationError(
-        "OWNER_CANNOT_BE_REMOVED",
+        "OWNER_ALWAYS_MANAGER",
         "The ledger creator is always a manager.",
       );
     }
@@ -428,16 +432,6 @@ export class LedgerService {
         "MEMBER_NOT_FOUND",
         "This user is not a ledger member.",
         { userIds: [input.memberUserId] },
-      );
-    }
-    // Never leave a ledger with nobody able to administer it.
-    if (
-      !input.isManager &&
-      members.filter(({ isManager }) => isManager).length <= 1
-    ) {
-      throw new ApplicationError(
-        "LAST_MANAGER",
-        "A ledger must keep at least one manager.",
       );
     }
     await this.#db
