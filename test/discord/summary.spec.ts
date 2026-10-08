@@ -52,17 +52,32 @@ const summary = (guildId: string, user: string, ledgerId: string, extra: unknown
   );
 
 describe("/summary", () => {
-  it("reports the total, each member's paid vs share, and categories", async () => {
+  it("reports the total, what each member spent, and categories", async () => {
     const { guildId, a, b, ledger } = await fixture();
     const out = (await json(await summary(guildId, a, ledger.id))).data?.content ?? "";
 
     expect(out).toContain("總支出：TWD 400，共 2 筆");
-    // a paid 300, was allocated 150 → owed 150 back.
-    expect(out).toContain(`<@${a}>：付出 TWD 300｜分攤 TWD 150｜應收 TWD 150`);
-    // b paid 100, was allocated 250 → owes 150.
-    expect(out).toContain(`<@${b}>：付出 TWD 100｜分攤 TWD 250｜應付 TWD 150`);
+    // b consumed 250 of the 400 across both expenses but paid only 100.
+    expect(out).toContain(`<@${b}>：花費 TWD 250（63%，2 筆）｜實際付款 TWD 100`);
+    expect(out).toContain(`<@${a}>：花費 TWD 150（38%，1 筆）｜實際付款 TWD 300`);
+    // Biggest spender first.
+    expect(out.indexOf(`<@${b}>`)).toBeLessThan(out.indexOf(`<@${a}>`));
     expect(out).toContain("餐飲：TWD 300（75%）");
     expect(out).toContain("交通：TWD 100（25%）");
+  });
+
+  it("leaves who-owes-whom to /balances, so a settlement can't contradict it", async () => {
+    const { guildId, a, b, ledger, t } = await fixture();
+    await t.createSettlement({
+      interactionId: `sm-s-${sequence}`, ledgerId: ledger.id, guildId,
+      actorUserId: b, payerUserId: b, receiverUserId: a,
+      amountMinor: 150, occurredOn: "2026-08-27",
+    });
+    const out = (await json(await summary(guildId, a, ledger.id))).data?.content ?? "";
+    // A repayment is not spending.
+    expect(out).toContain("總支出：TWD 400，共 2 筆");
+    expect(out).not.toMatch(/應收|應付/);
+    expect(out).toContain("/balances");
   });
 
   it("honours a date range", async () => {
@@ -96,6 +111,72 @@ describe("/summary", () => {
       await summary(guildId, a, ledger.id, [{ name: "public", type: 5, value: true }]),
     );
     expect(shown.data?.flags).toBeUndefined();
+  });
+
+  it("breaks down one member's spending", async () => {
+    const { guildId, a, b, ledger } = await fixture();
+    const out = (
+      await json(
+        await summary(guildId, a, ledger.id, [{ name: "member", type: 3, value: b }]),
+      )
+    ).data?.content ?? "";
+
+    expect(out).toContain(`<@${b}> 在「${ledger.name}」的花費`);
+    expect(out).toContain("個人花費：TWD 250（佔總支出 63%），共 2 筆");
+    expect(out).toContain("實際付款：TWD 100");
+    expect(out).toContain("餐飲：TWD 150（60%）");
+    expect(out).toContain("交通：TWD 100（40%）");
+    expect(out).toContain(`2026-08-20 未填說明｜#餐飲：TWD 150（總額 TWD 300，<@${a}> 付）`);
+    expect(out).toContain("2026-08-25 未填說明｜#交通：TWD 100（總額 TWD 100，自己付）");
+    // Newest first.
+    expect(out.indexOf("2026-08-25")).toBeLessThan(out.indexOf("2026-08-20"));
+  });
+
+  it("lists an expense the member only fronted", async () => {
+    const { guildId, a, b, ledger, t } = await fixture();
+    await t.createExpense({
+      interactionId: `sm-e3-${sequence}`, ledgerId: ledger.id, guildId,
+      actorUserId: a, payerUserId: a, totalAmountMinor: 80,
+      shares: [{ userId: b, amountMinor: 80 }],
+      description: "幫買咖啡", occurredOn: "2026-08-26",
+    });
+    const out = (
+      await json(
+        await summary(guildId, a, ledger.id, [{ name: "member", type: 3, value: a }]),
+      )
+    ).data?.content ?? "";
+    expect(out).toContain("個人花費：TWD 150（佔總支出 31%），共 1 筆");
+    expect(out).toContain("實際付款：TWD 380");
+    expect(out).toContain("2026-08-26 幫買咖啡：代墊 TWD 80（自己未分攤）");
+  });
+
+  it("keeps a long breakdown within Discord's message limit", async () => {
+    const { guildId, a, b, ledger, t } = await fixture();
+    for (let i = 0; i < 40; i += 1) {
+      await t.createExpense({
+        interactionId: `sm-long-${sequence}-${i}`, ledgerId: ledger.id, guildId,
+        actorUserId: a, payerUserId: a, totalAmountMinor: 100,
+        shares: [{ userId: a, amountMinor: 50 }, { userId: b, amountMinor: 50 }],
+        description: "很長的說明".repeat(8), occurredOn: "2026-08-21",
+      });
+    }
+    const out = (
+      await json(
+        await summary(guildId, a, ledger.id, [{ name: "member", type: 3, value: b }]),
+      )
+    ).data?.content ?? "";
+    expect(out.length).toBeLessThanOrEqual(2000);
+    expect(out).toMatch(/…還有 \d+ 筆/);
+  });
+
+  it("says so when the member spent nothing", async () => {
+    const { guildId, a, ledger } = await fixture();
+    const out = (
+      await json(
+        await summary(guildId, a, ledger.id, [{ name: "member", type: 3, value: "6698888" }]),
+      )
+    ).data?.content ?? "";
+    expect(out).toContain("沒有花費");
   });
 
   it("refuses a non-member", async () => {

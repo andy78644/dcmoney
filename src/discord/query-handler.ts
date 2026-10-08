@@ -892,6 +892,9 @@ function balanceComponents(sessionId: string, state: BalanceSessionState): unkno
   ];
 }
 
+// Discord rejects message content over 2000 characters.
+const MAX_MESSAGE_LENGTH = 2000;
+
 export async function startSummary(
   interaction: DiscordInteraction,
   db: D1Database,
@@ -904,53 +907,127 @@ export async function startSummary(
   const ledger = await ledgers.requireMember(ledgerId, guildId, actorUserId);
   const startDate = optionalString(options, "start_date");
   const endDate = optionalString(options, "end_date");
-
-  const summary = await new TransactionService(db).getSummary({
-    ledgerId,
-    guildId,
-    actorUserId,
-    ...(startDate === undefined ? {} : { startDate }),
-    ...(endDate === undefined ? {} : { endDate }),
-  });
-  if (summary.expenseCount === 0) {
-    return ephemeral(`「${ledger.name}」在這個範圍內沒有支出。`);
-  }
+  const memberValue = optionalString(options, "member");
 
   const money = (amountMinor: number) =>
     `${ledger.currencyCode} ${formatMinorAmount(
       amountMinor,
       ledger.currencyScale,
     )}`;
+  const percent = (part: number, whole: number) =>
+    whole === 0 ? 0 : Math.round((part / whole) * 100);
   const range =
     startDate === undefined && endDate === undefined
       ? ""
       : `（${startDate ?? "最早"} ~ ${endDate ?? "今天"}）`;
+  const reply = (content: string) =>
+    optionalBoolean(options, "public")
+      ? publicMessage(content)
+      : ephemeral(content);
+  const access = {
+    ledgerId,
+    guildId,
+    actorUserId,
+    ...(startDate === undefined ? {} : { startDate }),
+    ...(endDate === undefined ? {} : { endDate }),
+  };
+
+  if (memberValue !== undefined) {
+    const memberUserId = parseUserId(memberValue);
+    const spending = await new TransactionService(db).getMemberSpending({
+      ...access,
+      memberUserId,
+    });
+    if (spending.items.length === 0) {
+      return ephemeral(
+        `<@${memberUserId}> 在「${ledger.name}」這個範圍內沒有花費。`,
+      );
+    }
+    const shared = spending.items.filter((item) => item.shareMinor > 0);
+    const lines = [
+      `<@${memberUserId}> 在「${ledger.name}」的花費${range}`,
+      `個人花費：${money(spending.spentMinor)}（佔總支出 ${percent(
+        spending.spentMinor,
+        spending.ledgerSpentMinor,
+      )}%），共 ${shared.length} 筆`,
+      `實際付款：${money(spending.paidMinor)}`,
+    ];
+    if (spending.perCategory.length > 0) {
+      lines.push("", "分類：");
+      for (const { category, amountMinor } of spending.perCategory.slice(0, 15)) {
+        lines.push(
+          `• ${category ?? "未分類"}：${money(amountMinor)}（${percent(
+            amountMinor,
+            spending.spentMinor,
+          )}%）`,
+        );
+      }
+    }
+    lines.push("", "明細：");
+    const itemLines = spending.items.map((item) => {
+      const category = item.category === null ? "" : `｜#${item.category}`;
+      const head = `• ${item.occurredOn} ${item.description || "未填說明"}${category}`;
+      const paidBy =
+        item.payerUserId === memberUserId ? "自己付" : `<@${item.payerUserId}> 付`;
+      return item.shareMinor === 0
+        ? `${head}：代墊 ${money(item.totalAmountMinor)}（自己未分攤）`
+        : `${head}：${money(item.shareMinor)}（總額 ${money(
+            item.totalAmountMinor,
+          )}，${paidBy}）`;
+    });
+    // Keep as many rows as fit, newest first, and say how many were left out.
+    const footerRoom = 80;
+    let length = lines.join("\n").length;
+    let shown = 0;
+    for (const line of itemLines) {
+      if (length + line.length + 1 > MAX_MESSAGE_LENGTH - footerRoom) {
+        break;
+      }
+      lines.push(line);
+      length += line.length + 1;
+      shown += 1;
+    }
+    if (shown < itemLines.length) {
+      lines.push(
+        `…還有 ${itemLines.length - shown} 筆，可用 /expenses 搭配 member 查看。`,
+      );
+    }
+    return reply(lines.join("\n"));
+  }
+
+  const summary = await new TransactionService(db).getSummary(access);
+  if (summary.expenseCount === 0) {
+    return ephemeral(`「${ledger.name}」在這個範圍內沒有支出。`);
+  }
 
   const lines = [
     `「${ledger.name}」統計${range}`,
     `總支出：${money(summary.totalSpentMinor)}，共 ${summary.expenseCount} 筆`,
     "",
-    "每人：",
-    ...summary.perMember.map(({ userId, paidMinor, shareMinor }) => {
-      const net = paidMinor - shareMinor;
-      const sign = net > 0 ? "應收" : net < 0 ? "應付" : "打平";
-      const netText = net === 0 ? "打平" : `${sign} ${money(Math.abs(net))}`;
-      return `• <@${userId}>：付出 ${money(paidMinor)}｜分攤 ${money(
+    "每人花費：",
+    ...summary.perMember.map(({ userId, paidMinor, shareMinor, shareCount }) =>
+      `• <@${userId}>：花費 ${money(shareMinor)}（${percent(
         shareMinor,
-      )}｜${netText}`;
-    }),
+        summary.totalSpentMinor,
+      )}%，${shareCount} 筆）｜實際付款 ${money(paidMinor)}`,
+    ),
   ];
   if (summary.perCategory.length > 0) {
     lines.push("", "分類：");
     for (const { category, amountMinor } of summary.perCategory.slice(0, 15)) {
-      const share = Math.round((amountMinor / summary.totalSpentMinor) * 100);
-      lines.push(`• ${category ?? "未分類"}：${money(amountMinor)}（${share}%）`);
+      lines.push(
+        `• ${category ?? "未分類"}：${money(amountMinor)}（${percent(
+          amountMinor,
+          summary.totalSpentMinor,
+        )}%）`,
+      );
     }
   }
-  const content = lines.join("\n");
-  return optionalBoolean(options, "public")
-    ? publicMessage(content)
-    : ephemeral(content);
+  lines.push(
+    "",
+    "加上 member 選項可查看某位成員的花費明細；誰該還誰請用 /balances。",
+  );
+  return reply(lines.join("\n"));
 }
 
 export async function startBalances(
