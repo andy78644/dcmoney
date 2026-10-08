@@ -327,12 +327,13 @@ export const commandDefinitions = [
   },
   {
     name: "summary",
-    description: "查看總支出、每人付了多少與分類統計",
+    description: "查看總支出、每人花了多少與分類統計",
     type: 1,
     contexts: [0],
     integration_types: [0],
     options: [
       ledgerOption,
+      memberOption("member", "查看這位成員的花費明細", false),
       {
         type: stringOption,
         name: "start_date",

@@ -575,10 +575,137 @@ export class TransactionService {
           paidMinor: paidBy.get(userId) ?? 0,
           shareMinor: shareBy.get(userId) ?? 0,
         }))
-        .sort((a, b) => b.paidMinor - a.paidMinor || a.userId.localeCompare(b.userId)),
+        .sort(
+          (a, b) =>
+            b.shareMinor - a.shareMinor ||
+            b.paidMinor - a.paidMinor ||
+            a.userId.localeCompare(b.userId),
+        ),
       perCategory: rowsOf<{ category: string | null; amount: number }>(
         categories,
       ).map(({ category, amount }) => ({ category, amountMinor: amount })),
+    };
+  }
+
+  /**
+   * One member's spending for a period: what they consumed (their shares),
+   * what they fronted for others, and the expenses behind those numbers.
+   */
+  async getMemberSpending(
+    input: TransactionAccess & {
+      memberUserId: string;
+      startDate?: string;
+      endDate?: string;
+    },
+  ): Promise<{
+    ledgerSpentMinor: number;
+    spentMinor: number;
+    paidMinor: number;
+    perCategory: Array<{ category: string | null; amountMinor: number }>;
+    items: Array<{
+      transactionId: string;
+      occurredOn: string;
+      description: string;
+      category: string | null;
+      payerUserId: string;
+      totalAmountMinor: number;
+      shareMinor: number;
+    }>;
+  }> {
+    await this.#ledgers.requireMember(
+      input.ledgerId,
+      input.guildId,
+      input.actorUserId,
+    );
+    const clauses = [
+      "t.ledger_id = ?",
+      "t.deleted_at IS NULL",
+      "t.type = 'expense'",
+    ];
+    const bindings: string[] = [input.ledgerId];
+    if (input.startDate !== undefined) {
+      assertCalendarDate(input.startDate);
+      clauses.push("t.occurred_on >= ?");
+      bindings.push(input.startDate);
+    }
+    if (input.endDate !== undefined) {
+      assertCalendarDate(input.endDate);
+      clauses.push("t.occurred_on <= ?");
+      bindings.push(input.endDate);
+    }
+    const where = clauses.join(" AND ");
+    const member = input.memberUserId;
+
+    const [totals, rows] = await this.#db.batch([
+      this.#db
+        .prepare(
+          `SELECT COALESCE(SUM(t.total_amount_minor), 0) AS total
+             FROM transactions t WHERE ${where}`,
+        )
+        .bind(...bindings),
+      // Every expense the member either shared in or paid for; the share is 0
+      // when they only fronted the money.
+      this.#db
+        .prepare(
+          `SELECT t.id, t.occurred_on, t.description, t.category,
+                  t.total_amount_minor, d.payer_user_id,
+                  COALESCE(s.amount_minor, 0) AS share
+             FROM transactions t
+             JOIN expense_details d ON d.transaction_id = t.id
+             LEFT JOIN expense_shares s
+               ON s.transaction_id = t.id AND s.user_id = ?
+            WHERE ${where}
+              AND (s.user_id IS NOT NULL OR d.payer_user_id = ?)
+            ORDER BY t.occurred_on DESC, t.created_at DESC, t.id DESC`,
+        )
+        .bind(member, ...bindings, member),
+    ]);
+
+    const totalRow = ((totals?.results ?? []) as Array<{ total: number }>)[0];
+    const items = (
+      (rows?.results ?? []) as Array<{
+        id: string;
+        occurred_on: string;
+        description: string;
+        category: string | null;
+        total_amount_minor: number;
+        payer_user_id: string;
+        share: number;
+      }>
+    ).map((row) => ({
+      transactionId: row.id,
+      occurredOn: row.occurred_on,
+      description: row.description,
+      category: row.category,
+      payerUserId: row.payer_user_id,
+      totalAmountMinor: row.total_amount_minor,
+      shareMinor: row.share,
+    }));
+
+    const byCategory = new Map<string | null, number>();
+    let spentMinor = 0;
+    let paidMinor = 0;
+    for (const item of items) {
+      spentMinor += item.shareMinor;
+      if (item.payerUserId === member) {
+        paidMinor += item.totalAmountMinor;
+      }
+      if (item.shareMinor > 0) {
+        byCategory.set(
+          item.category,
+          (byCategory.get(item.category) ?? 0) + item.shareMinor,
+        );
+      }
+    }
+
+    return {
+      ledgerSpentMinor: totalRow?.total ?? 0,
+      spentMinor,
+      paidMinor,
+      perCategory: [...byCategory]
+        .map(([category, amountMinor]) => ({ category, amountMinor }))
+        .sort((a, b) => b.amountMinor - a.amountMinor),
+      items,
     };
   }
 
