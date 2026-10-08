@@ -57,14 +57,27 @@ describe("/summary", () => {
     const out = (await json(await summary(guildId, a, ledger.id))).data?.content ?? "";
 
     expect(out).toContain("總支出：TWD 400，共 2 筆");
-    // b consumed 250 of the 400, fronting only 100 → owes 150.
-    expect(out).toContain(`<@${b}>：花費 TWD 250（63%）｜代墊 TWD 100｜應付 TWD 150`);
-    // a consumed 150, fronting 300 → owed 150 back.
-    expect(out).toContain(`<@${a}>：花費 TWD 150（38%）｜代墊 TWD 300｜應收 TWD 150`);
+    // b consumed 250 of the 400 across both expenses but paid only 100.
+    expect(out).toContain(`<@${b}>：花費 TWD 250（63%，2 筆）｜實際付款 TWD 100`);
+    expect(out).toContain(`<@${a}>：花費 TWD 150（38%，1 筆）｜實際付款 TWD 300`);
     // Biggest spender first.
     expect(out.indexOf(`<@${b}>`)).toBeLessThan(out.indexOf(`<@${a}>`));
     expect(out).toContain("餐飲：TWD 300（75%）");
     expect(out).toContain("交通：TWD 100（25%）");
+  });
+
+  it("leaves who-owes-whom to /balances, so a settlement can't contradict it", async () => {
+    const { guildId, a, b, ledger, t } = await fixture();
+    await t.createSettlement({
+      interactionId: `sm-s-${sequence}`, ledgerId: ledger.id, guildId,
+      actorUserId: b, payerUserId: b, receiverUserId: a,
+      amountMinor: 150, occurredOn: "2026-08-27",
+    });
+    const out = (await json(await summary(guildId, a, ledger.id))).data?.content ?? "";
+    // A repayment is not spending.
+    expect(out).toContain("總支出：TWD 400，共 2 筆");
+    expect(out).not.toMatch(/應收|應付/);
+    expect(out).toContain("/balances");
   });
 
   it("honours a date range", async () => {
@@ -110,7 +123,7 @@ describe("/summary", () => {
 
     expect(out).toContain(`<@${b}> 在「${ledger.name}」的花費`);
     expect(out).toContain("個人花費：TWD 250（佔總支出 63%），共 2 筆");
-    expect(out).toContain("代墊：TWD 100｜應付 TWD 150");
+    expect(out).toContain("實際付款：TWD 100");
     expect(out).toContain("餐飲：TWD 150（60%）");
     expect(out).toContain("交通：TWD 100（40%）");
     expect(out).toContain(`2026-08-20 未填說明｜#餐飲：TWD 150（總額 TWD 300，<@${a}> 付）`);
@@ -133,7 +146,7 @@ describe("/summary", () => {
       )
     ).data?.content ?? "";
     expect(out).toContain("個人花費：TWD 150（佔總支出 31%），共 1 筆");
-    expect(out).toContain("代墊：TWD 380｜應收 TWD 230");
+    expect(out).toContain("實際付款：TWD 380");
     expect(out).toContain("2026-08-26 幫買咖啡：代墊 TWD 80（自己未分攤）");
   });
 

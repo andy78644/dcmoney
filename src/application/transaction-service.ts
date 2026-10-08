@@ -488,7 +488,12 @@ export class TransactionService {
   ): Promise<{
     totalSpentMinor: number;
     expenseCount: number;
-    perMember: Array<{ userId: string; paidMinor: number; shareMinor: number }>;
+    perMember: Array<{
+      userId: string;
+      paidMinor: number;
+      shareMinor: number;
+      shareCount: number;
+    }>;
     perCategory: Array<{ category: string | null; amountMinor: number }>;
   }> {
     await this.#ledgers.requireMember(
@@ -533,7 +538,7 @@ export class TransactionService {
         .bind(...bindings),
       this.#db
         .prepare(
-          `SELECT s.user_id, SUM(s.amount_minor) AS amount
+          `SELECT s.user_id, SUM(s.amount_minor) AS amount, COUNT(*) AS n
              FROM transactions t
              JOIN expense_shares s ON s.transaction_id = t.id
             WHERE ${where}
@@ -560,8 +565,8 @@ export class TransactionService {
       ),
     );
     const shareBy = new Map(
-      rowsOf<{ user_id: string; amount: number }>(shares).map(
-        ({ user_id, amount }) => [user_id, amount],
+      rowsOf<{ user_id: string; amount: number; n: number }>(shares).map(
+        (row) => [row.user_id, row],
       ),
     );
     const everyone = new Set([...paidBy.keys(), ...shareBy.keys()]);
@@ -573,7 +578,8 @@ export class TransactionService {
         .map((userId) => ({
           userId,
           paidMinor: paidBy.get(userId) ?? 0,
-          shareMinor: shareBy.get(userId) ?? 0,
+          shareMinor: shareBy.get(userId)?.amount ?? 0,
+          shareCount: shareBy.get(userId)?.n ?? 0,
         }))
         .sort(
           (a, b) =>

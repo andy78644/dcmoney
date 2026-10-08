@@ -943,9 +943,6 @@ export async function startSummary(
         `<@${memberUserId}> 在「${ledger.name}」這個範圍內沒有花費。`,
       );
     }
-    const net = spending.paidMinor - spending.spentMinor;
-    const netText =
-      net === 0 ? "打平" : `${net > 0 ? "應收" : "應付"} ${money(Math.abs(net))}`;
     const shared = spending.items.filter((item) => item.shareMinor > 0);
     const lines = [
       `<@${memberUserId}> 在「${ledger.name}」的花費${range}`,
@@ -953,7 +950,7 @@ export async function startSummary(
         spending.spentMinor,
         spending.ledgerSpentMinor,
       )}%），共 ${shared.length} 筆`,
-      `代墊：${money(spending.paidMinor)}｜${netText}`,
+      `實際付款：${money(spending.paidMinor)}`,
     ];
     if (spending.perCategory.length > 0) {
       lines.push("", "分類：");
@@ -1008,15 +1005,12 @@ export async function startSummary(
     `總支出：${money(summary.totalSpentMinor)}，共 ${summary.expenseCount} 筆`,
     "",
     "每人花費：",
-    ...summary.perMember.map(({ userId, paidMinor, shareMinor }) => {
-      const net = paidMinor - shareMinor;
-      const netText =
-        net === 0 ? "打平" : `${net > 0 ? "應收" : "應付"} ${money(Math.abs(net))}`;
-      return `• <@${userId}>：花費 ${money(shareMinor)}（${percent(
+    ...summary.perMember.map(({ userId, paidMinor, shareMinor, shareCount }) =>
+      `• <@${userId}>：花費 ${money(shareMinor)}（${percent(
         shareMinor,
         summary.totalSpentMinor,
-      )}%）｜代墊 ${money(paidMinor)}｜${netText}`;
-    }),
+      )}%，${shareCount} 筆）｜實際付款 ${money(paidMinor)}`,
+    ),
   ];
   if (summary.perCategory.length > 0) {
     lines.push("", "分類：");
@@ -1029,7 +1023,10 @@ export async function startSummary(
       );
     }
   }
-  lines.push("", "加上 member 選項可查看某位成員的花費明細。");
+  lines.push(
+    "",
+    "加上 member 選項可查看某位成員的花費明細；誰該還誰請用 /balances。",
+  );
   return reply(lines.join("\n"));
 }
 
